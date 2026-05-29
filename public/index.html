@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ScholarNest — University Notes Marketplace</title>
+  <meta name="description" content="Buy and sell university notes, past papers, and study guides. Secured with device-locked access codes." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,400&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+  <link rel="stylesheet" href="/static/css/app.css" />
+</head>
+<body>
+  <div id="app">
+
+    <!-- NAV -->
+    <nav id="main-nav" class="nav">
+      <a href="#" class="logo" id="nav-logo">Scholar<span>Nest</span></a>
+      <div class="nav-center" id="nav-search-wrap">
+        <div class="nav-search">
+          <i data-lucide="search"></i>
+          <input type="text" id="nav-search-input" placeholder="Search notes, courses…" />
+        </div>
+      </div>
+      <div class="nav-right">
+        <button class="nav-icon-btn" id="notif-btn">
+          <i data-lucide="bell"></i>
+          <span class="notif-dot" id="notif-dot" hidden></span>
+        </button>
+        <div id="nav-auth-btns">
+          <button class="btn btn-ghost" id="nav-login-btn">Log in</button>
+          <button class="btn btn-primary" id="nav-register-btn">Sign up</button>
+        </div>
+        <div id="nav-user-menu" hidden>
+          <button class="user-avatar-btn" id="user-avatar-btn">
+            <span id="nav-avatar-initials">JD</span>
+          </button>
+        </div>
+      </div>
+    </nav>
+
+    <!-- Notifications dropdown -->
+    <div id="notif-panel" class="notif-panel" hidden>
+      <div class="notif-header">
+        <span>Notifications</span>
+        <button id="mark-all-read-btn" class="link-btn">Mark all read</button>
+      </div>
+      <div id="notif-list" class="notif-list">
+        <div class="empty-state-sm">No notifications</div>
+      </div>
+    </div>
+
+    <!-- User menu dropdown -->
+    <div id="user-menu-panel" class="user-menu-panel" hidden>
+      <div id="user-menu-name" class="user-menu-name"></div>
+      <div id="user-menu-role" class="user-menu-role"></div>
+      <hr class="menu-divider" />
+      <button id="menu-my-codes" class="menu-item"><i data-lucide="key-round"></i> My codes</button>
+      <button id="menu-purchases" class="menu-item"><i data-lucide="receipt"></i> Purchases</button>
+      <div id="seller-menu-items" hidden>
+        <hr class="menu-divider" />
+        <button id="menu-seller-dashboard" class="menu-item"><i data-lucide="bar-chart-2"></i> Seller dashboard</button>
+        <button id="menu-upload" class="menu-item"><i data-lucide="upload"></i> Upload notes</button>
+      </div>
+      <div id="admin-menu-items" hidden>
+        <hr class="menu-divider" />
+        <button id="menu-admin" class="menu-item"><i data-lucide="shield"></i> Admin panel</button>
+      </div>
+      <hr class="menu-divider" />
+      <button id="menu-logout" class="menu-item menu-item-danger"><i data-lucide="log-out"></i> Log out</button>
+    </div>
+
+    <!-- PAGES -->
+    <main id="main-content">
+
+      <!-- MARKETPLACE -->
+      <div id="page-marketplace" class="page active">
+        <div class="hero">
+          <div class="hero-eyebrow">Peer-to-peer knowledge</div>
+          <h1>Study smarter with<br><em>verified notes</em></h1>
+          <p>Buy and sell university notes, past papers, and study guides — secured with device-locked access codes.</p>
+          <div class="hero-search">
+            <i data-lucide="search"></i>
+            <input type="text" id="hero-search" placeholder="Search by course, unit, or topic…" />
+          </div>
+        </div>
+        <div class="marketplace-body">
+          <div class="filter-bar">
+            <div class="filter-scroll" id="uni-filters">
+              <button class="chip active" data-uni="all">All universities</button>
+            </div>
+          </div>
+          <div class="filter-bar" id="dept-filter-bar" hidden>
+            <div class="filter-scroll" id="dept-filters"></div>
+          </div>
+          <div class="filter-bar">
+            <div class="filter-scroll" id="type-filters">
+              <button class="chip active" data-type="all">All types</button>
+              <button class="chip" data-type="notes">Notes</button>
+              <button class="chip" data-type="past_paper">Past papers</button>
+              <button class="chip" data-type="summary">Summaries</button>
+              <button class="chip" data-type="revision_pack">Revision packs</button>
+            </div>
+          </div>
+          <div id="passes-section" hidden>
+            <div class="section-header">
+              <h2>Department Access Passes</h2>
+              <span class="section-sub">Unlimited access for a limited period</span>
+            </div>
+            <div id="passes-grid" class="passes-grid"></div>
+          </div>
+          <div class="section-header">
+            <h2 id="notes-section-title">Featured notes</h2>
+            <span id="notes-count" class="section-sub"></span>
+          </div>
+          <div id="notes-grid" class="notes-grid"></div>
+          <div id="load-more-wrap" class="load-more-wrap" hidden>
+            <button id="load-more-btn" class="btn btn-ghost">Load more</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- DOCUMENT DETAIL -->
+      <div id="page-document" class="page">
+        <div class="doc-detail-wrap">
+          <button class="back-btn" id="doc-back-btn"><i data-lucide="arrow-left"></i> Back</button>
+          <div id="doc-detail-content"></div>
+        </div>
+      </div>
+
+      <!-- VIEWER -->
+      <div id="page-viewer" class="page page-fullscreen">
+        <div class="viewer-nav">
+          <button class="viewer-back" id="viewer-back-btn"><i data-lucide="arrow-left"></i></button>
+          <div class="viewer-doc-info">
+            <div id="viewer-title" class="viewer-doc-title">Loading…</div>
+            <div id="viewer-subtitle" class="viewer-doc-sub"></div>
+          </div>
+          <div class="viewer-security-badge"><i data-lucide="shield-check"></i> Secured</div>
+        </div>
+        <div class="viewer-toolbar">
+          <button class="tb-btn" id="zoom-out-btn"><i data-lucide="zoom-out"></i></button>
+          <span id="zoom-level" class="tb-zoom">100%</span>
+          <button class="tb-btn" id="zoom-in-btn"><i data-lucide="zoom-in"></i></button>
+          <div class="tb-sep"></div>
+          <button class="tb-btn tb-disabled" title="Download disabled"><i data-lucide="download"></i> Download</button>
+          <button class="tb-btn tb-disabled" title="Print disabled"><i data-lucide="printer"></i> Print</button>
+          <div class="tb-page-info" id="viewer-page-info">Page 1 of —</div>
+        </div>
+        <div id="viewer-body" class="viewer-body">
+          <div id="viewer-pages" class="viewer-pages"></div>
+        </div>
+        <div class="viewer-footer">
+          <button class="viewer-nav-btn" id="prev-page"><i data-lucide="chevron-left"></i> Prev</button>
+          <div id="viewer-page-dots" class="viewer-page-dots"></div>
+          <button class="viewer-nav-btn" id="next-page">Next <i data-lucide="chevron-right"></i></button>
+        </div>
+      </div>
+
+      <!-- ACCESS CODE -->
+      <div id="page-access" class="page page-centered">
+        <div class="access-card">
+          <div class="access-icon"><i data-lucide="lock-open"></i></div>
+          <h2>Enter your access code</h2>
+          <p>Your code activates on this device only. Sharing it will invalidate the license immediately.</p>
+          <label class="field-label">Access code</label>
+          <input class="code-input" id="access-code-input" type="text" placeholder="SNXX-XXXX-XXXX" maxlength="14" />
+          <div class="field-error" id="access-error" hidden></div>
+          <div class="device-info-box">
+            <div class="di-row"><span class="di-label">Device fingerprint</span><span class="di-val" id="di-fp">computing…</span></div>
+            <div class="di-row"><span class="di-label">Browser</span><span class="di-val" id="di-browser">—</span></div>
+            <div class="di-row"><span class="di-label">Status</span><span class="di-val di-unbound">Not yet bound</span></div>
+          </div>
+          <button class="btn btn-primary btn-full" id="unlock-btn">
+            <i data-lucide="lock-open"></i> Unlock document
+          </button>
+          <div class="warning-box">
+            <i data-lucide="triangle-alert"></i>
+            <span>This code binds permanently to your device fingerprint on first use. Any other device will be denied access.</span>
+          </div>
+        </div>
+        <button class="link-btn mt-16" id="view-all-codes-btn">View all my codes →</button>
+      </div>
+
+      <!-- MY CODES -->
+      <div id="page-my-codes" class="page">
+        <div class="page-wrap">
+          <div class="page-header">
+            <h1>My access codes</h1>
+            <button class="btn btn-primary" id="buy-more-btn"><i data-lucide="plus"></i> Buy more</button>
+          </div>
+          <div id="my-codes-list" class="codes-list"></div>
+        </div>
+      </div>
+
+      <!-- LOGIN -->
+      <div id="page-login" class="page page-centered">
+        <div class="auth-card">
+          <div class="auth-logo">Scholar<span>Nest</span></div>
+          <h2>Welcome back</h2>
+          <p class="auth-sub">Log in to access your notes and codes</p>
+          <div class="field-group">
+            <label class="field-label">Email</label>
+            <input type="email" id="login-email" class="field-input" placeholder="you@university.ac.ke" />
+          </div>
+          <div class="field-group">
+            <label class="field-label">Password</label>
+            <input type="password" id="login-password" class="field-input" placeholder="••••••••" />
+          </div>
+          <div class="field-error" id="login-error" hidden></div>
+          <button class="btn btn-primary btn-full" id="login-btn">Log in</button>
+          <div class="auth-switch">Don't have an account? <a href="#" id="go-register-link">Sign up</a></div>
+        </div>
+      </div>
+
+      <!-- REGISTER -->
+      <div id="page-register" class="page page-centered">
+        <div class="auth-card">
+          <div class="auth-logo">Scholar<span>Nest</span></div>
+          <h2>Create your account</h2>
+          <p class="auth-sub">Join thousands of students sharing knowledge</p>
+          <div class="form-row">
+            <div class="field-group">
+              <label class="field-label">Full name</label>
+              <input type="text" id="reg-name" class="field-input" placeholder="Jane Doe" />
+            </div>
+            <div class="field-group">
+              <label class="field-label">Phone (M-Pesa)</label>
+              <input type="tel" id="reg-phone" class="field-input" placeholder="0712 345 678" />
+            </div>
+          </div>
+          <div class="field-group">
+            <label class="field-label">Email</label>
+            <input type="email" id="reg-email" class="field-input" placeholder="you@university.ac.ke" />
+          </div>
+          <div class="field-group">
+            <label class="field-label">University</label>
+            <select id="reg-university" class="field-input">
+              <option value="">Select your university…</option>
+            </select>
+          </div>
+          <div class="field-group">
+            <label class="field-label">Password</label>
+            <input type="password" id="reg-password" class="field-input" placeholder="Min. 8 characters" />
+          </div>
+          <div class="field-group">
+            <label class="field-label">Account type</label>
+            <div class="role-toggle" id="role-toggle">
+              <button class="role-btn active" data-role="buyer"><i data-lucide="book-open"></i> Buyer — I want to study</button>
+              <button class="role-btn" data-role="seller"><i data-lucide="upload"></i> Seller — I want to earn</button>
+            </div>
+          </div>
+          <div id="seller-note" class="info-box" hidden>
+            <i data-lucide="info"></i>
+            Seller accounts require review before you can upload. Usually takes 24–48 hours.
+          </div>
+          <div class="field-error" id="reg-error" hidden></div>
+          <button class="btn btn-primary btn-full" id="reg-btn">Create account</button>
+          <div class="auth-switch">Already have an account? <a href="#" id="go-login-link">Log in</a></div>
+        </div>
+      </div>
+
+      <!-- UPLOAD -->
+      <div id="page-upload" class="page">
+        <div class="page-wrap">
+          <div class="page-header">
+            <h1>Upload notes</h1>
+            <p class="page-sub">Documents are reviewed before going live. Plagiarism checks run automatically.</p>
+          </div>
+          <div class="upload-card">
+            <div class="upload-dropzone" id="upload-dropzone">
+              <div class="upload-icon"><i data-lucide="cloud-upload"></i></div>
+              <h3>Drop your file here</h3>
+              <p>PDF, DOCX, or PPTX · Max 50MB</p>
+              <span id="upload-filename" class="upload-filename"></span>
+            </div>
+            <input type="file" id="file-input" accept=".pdf,.docx,.pptx" hidden />
+            <div class="upload-form">
+              <div class="form-row">
+                <div class="field-group">
+                  <label class="field-label">Document title *</label>
+                  <input type="text" id="up-title" class="field-input" placeholder="e.g. Organic Chemistry Semester 2 Full Notes" />
+                </div>
+                <div class="field-group">
+                  <label class="field-label">Course code</label>
+                  <input type="text" id="up-course" class="field-input" placeholder="e.g. CHEM 201" />
+                </div>
+              </div>
+              <div class="form-row">
+                <div class="field-group">
+                  <label class="field-label">Department *</label>
+                  <select id="up-department" class="field-input"></select>
+                </div>
+                <div class="field-group">
+                  <label class="field-label">Document type *</label>
+                  <select id="up-type" class="field-input">
+                    <option value="notes">Notes</option>
+                    <option value="past_paper">Past paper</option>
+                    <option value="summary">Summary</option>
+                    <option value="revision_pack">Revision pack</option>
+                    <option value="bundle">Bundle</option>
+                  </select>
+                </div>
+              </div>
+              <div class="form-row">
+                <div class="field-group">
+                  <label class="field-label">Year</label>
+                  <select id="up-year" class="field-input">
+                    <option value="2024">2024</option>
+                    <option value="2023">2023</option>
+                    <option value="2022">2022</option>
+                    <option value="2021">2021</option>
+                  </select>
+                </div>
+                <div class="field-group">
+                  <label class="field-label">Individual price (KSh)</label>
+                  <input type="number" id="up-price" class="field-input" placeholder="e.g. 150" min="50" max="1000" />
+                </div>
+              </div>
+              <div class="field-group">
+                <label class="field-label">Description</label>
+                <textarea id="up-description" class="field-input field-textarea" placeholder="What topics are covered? How many pages? Any special inclusions?"></textarea>
+              </div>
+            </div>
+            <div class="field-error" id="upload-error" hidden></div>
+            <button class="btn btn-primary btn-full" id="upload-btn">
+              <i data-lucide="upload"></i> Submit for review
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- SELLER DASHBOARD -->
+      <div id="page-seller-dashboard" class="page">
+        <div class="page-wrap">
+          <div class="page-header">
+            <h1>Seller dashboard</h1>
+            <button class="btn btn-primary" id="seller-upload-btn"><i data-lucide="plus"></i> Upload notes</button>
+          </div>
+          <div id="seller-stats-grid" class="stats-grid"></div>
+          <div class="section-header"><h2>Your documents</h2></div>
+          <div id="seller-docs-list" class="seller-docs-list"></div>
+          <div class="section-header"><h2>Recent sales</h2></div>
+          <div id="seller-sales-list" class="sales-list"></div>
+        </div>
+      </div>
+
+      <!-- ADMIN -->
+      <div id="page-admin" class="page">
+        <div class="page-wrap">
+          <div class="page-header"><h1>Admin panel</h1></div>
+          <div id="admin-stats-grid" class="stats-grid"></div>
+          <div class="admin-tabs" id="admin-tabs">
+            <button class="tab-btn active" data-tab="sellers">Pending sellers</button>
+            <button class="tab-btn" data-tab="documents">Documents to review</button>
+            <button class="tab-btn" data-tab="payouts">Payouts due</button>
+          </div>
+          <div id="admin-tab-sellers" class="admin-tab active"><div id="admin-sellers-list"></div></div>
+          <div id="admin-tab-documents" class="admin-tab"><div id="admin-docs-list"></div></div>
+          <div id="admin-tab-payouts" class="admin-tab"><div id="admin-payouts-list"></div></div>
+        </div>
+      </div>
+
+    </main>
+
+    <!-- Payment modal -->
+    <div id="payment-modal" class="modal-overlay" hidden>
+      <div class="modal">
+        <button class="modal-close" id="modal-close-btn"><i data-lucide="x"></i></button>
+        <div class="modal-icon"><i data-lucide="smartphone"></i></div>
+        <h3 id="modal-title">Complete payment</h3>
+        <p id="modal-desc" class="modal-desc"></p>
+        <div class="field-group">
+          <label class="field-label">M-Pesa phone number</label>
+          <input type="tel" id="pay-phone" class="field-input" placeholder="0712 345 678" />
+        </div>
+        <div id="modal-amount" class="modal-amount"></div>
+        <button class="btn btn-primary btn-full" id="pay-btn">
+          <i data-lucide="credit-card"></i> Send STK Push
+        </button>
+        <div id="pay-status" class="pay-status" hidden></div>
+        <div id="pay-code-result" class="pay-code-result" hidden></div>
+      </div>
+    </div>
+
+    <!-- Toast -->
+    <div id="toast" class="toast" hidden></div>
+
+  </div>
+
+  <script src="/static/js/api.js"></script>
+  <script src="/static/js/app.js"></script>
+</body>
+</html>

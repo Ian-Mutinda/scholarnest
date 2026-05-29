@@ -1,0 +1,41 @@
+# Server
+PORT=3000
+NODE_ENV=development
+BASE_URL=http://localhost:3000
+
+# Database
+DB_HOST=localhost
+DB_PORT=5432
+DB_NAME=scholarnest
+DB_USER=postgres
+
+DB_PASSWORD=postgres123
+
+# JWT
+JWT_SECRET=ilovemygloriaalot37
+JWT_EXPIRES_IN=7d
+
+# M-Pesa Daraja API (Sandbox)
+MPESA_CONSUMER_KEY=your_consumer_key_here
+MPESA_CONSUMER_SECRET=your_consumer_secret_here
+MPESA_SHORTCODE=174379
+MPESA_PASSKEY=bfb279f9aa9bdbcf158e97dd71a467cd2e0c893059b10f78e6b72ada1ed2c919
+MPESA_CALLBACK_URL=https://yourdomain.com/api/payments/mpesa/callback
+MPESA_ENV=sandbox
+
+# File storage
+UPLOAD_DIR=./public/uploads/documents
+THUMBNAIL_DIR=./public/thumbnails
+MAX_FILE_SIZE_MB=50
+
+# Platform settings
+PLATFORM_CUT_PERCENT=30
+SELLER_CUT_PERCENT=70
+PAYOUT_DELAY_HOURS=2
+
+# Admin
+ADMIN_EMAIL=ianmutinda06@gmail.com
+ADMIN_PASSWORD=Ianandgloria37
+
+# Session
+COOKIE_SECRET=myglorialovesmealottoo37
