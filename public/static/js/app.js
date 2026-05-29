@@ -30,6 +30,7 @@ function bindStaticListeners() {
   document.getElementById('notif-btn').addEventListener('click', toggleNotifications);
   document.getElementById('user-avatar-btn').addEventListener('click', toggleUserMenu);
   document.getElementById('mark-all-read-btn').addEventListener('click', markAllRead);
+  
 
   // User menu
   document.getElementById('menu-my-codes').addEventListener('click', () => navigate('my-codes'));
@@ -101,9 +102,15 @@ function bindStaticListeners() {
   // Payment modal
   document.getElementById('modal-close-btn').addEventListener('click', closePaymentModal);
   document.getElementById('pay-btn').addEventListener('click', initiatePayment);
+  document.getElementById('payment-modal').addEventListener('click', function(e) {
+  if (e.target === this) closePaymentModal();
+});
+  
 
   // Close dropdowns on outside click
-  document.addEventListener('click', e => {
+   document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closePaymentModal();});
+   document.addEventListener('click', e => {
     if (!e.target.closest('#notif-btn') && !e.target.closest('#notif-panel')) {
       document.getElementById('notif-panel').hidden = true;
     }
@@ -1138,6 +1145,9 @@ function initIcons() {
 
 // Re-init icons whenever DOM changes (after dynamic content renders)
 const _iconObserver = new MutationObserver(() => {
-  if (window.lucide) window.lucide.createIcons();
+  if (window.lucide) {
+    clearTimeout(window._iconTimer);
+    window._iconTimer = setTimeout(() => window.lucide.createIcons(), 100);
+  }
 });
 _iconObserver.observe(document.getElementById('app'), { childList: true, subtree: true });
