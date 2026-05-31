@@ -261,7 +261,7 @@
         </div>
       </div>
 
-      <!-- UPLOAD -->
+<!-- UPLOAD -->
       <div id="page-upload" class="page">
         <div class="page-wrap">
           <div class="page-header">
@@ -289,9 +289,34 @@
               </div>
               <div class="form-row">
                 <div class="field-group">
-                  <label class="field-label">Department *</label>
-                  <select id="up-department" class="field-input"></select>
+                  <label class="field-label">Lecturer name</label>
+                  <input type="text" id="up-lecturer" class="field-input" placeholder="e.g. Dr. Kamau" />
                 </div>
+                <div class="field-group">
+                  <label class="field-label">Semester</label>
+                  <select id="up-semester" class="field-input">
+                    <option value="">Select semester…</option>
+                    <option value="1">Semester 1</option>
+                    <option value="2">Semester 2</option>
+                    <option value="3">Semester 3</option>
+                  </select>
+                </div>
+              </div>
+              <div class="form-row">
+                <div class="field-group">
+                  <label class="field-label">University *</label>
+                  <select id="up-university" class="field-input">
+                    <option value="">Select university…</option>
+                  </select>
+                </div>
+                <div class="field-group">
+                  <label class="field-label">Department *</label>
+                  <select id="up-department" class="field-input">
+                    <option value="">Select university first…</option>
+                  </select>
+                </div>
+              </div>
+              <div class="form-row">
                 <div class="field-group">
                   <label class="field-label">Document type *</label>
                   <select id="up-type" class="field-input">
@@ -302,17 +327,13 @@
                     <option value="bundle">Bundle</option>
                   </select>
                 </div>
-              </div>
-              <div class="form-row">
                 <div class="field-group">
                   <label class="field-label">Year</label>
                   <select id="up-year" class="field-input">
-                    <option value="2024">2024</option>
-                    <option value="2023">2023</option>
-                    <option value="2022">2022</option>
-                    <option value="2021">2021</option>
                   </select>
                 </div>
+              </div>
+              <div class="form-row">
                 <div class="field-group">
                   <label class="field-label">Individual price (KSh)</label>
                   <input type="number" id="up-price" class="field-input" placeholder="e.g. 150" min="50" max="1000" />
@@ -355,10 +376,14 @@
             <button class="tab-btn active" data-tab="sellers">Pending sellers</button>
             <button class="tab-btn" data-tab="documents">Documents to review</button>
             <button class="tab-btn" data-tab="payouts">Payouts due</button>
+            <button class="tab-btn" data-tab="all-users">All users</button>
+            <button class="tab-btn" data-tab="all-documents">All documents</button>
           </div>
           <div id="admin-tab-sellers" class="admin-tab active"><div id="admin-sellers-list"></div></div>
           <div id="admin-tab-documents" class="admin-tab"><div id="admin-docs-list"></div></div>
           <div id="admin-tab-payouts" class="admin-tab"><div id="admin-payouts-list"></div></div>
+          <div id="admin-tab-all-users" class="admin-tab"><div id="admin-users-list"></div></div>
+          <div id="admin-tab-all-documents" class="admin-tab"><div id="admin-all-docs-list"></div></div>
         </div>
       </div>
 

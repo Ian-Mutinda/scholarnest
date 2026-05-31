@@ -68,6 +68,13 @@ const API = {
     rejectDoc:       (id, r)  => API.post(`/admin/documents/${id}/reject`, { reason: r }),
     pendingPayouts:  ()       => API.get('/admin/payouts/pending'),
     processPayout:   (id)     => API.post(`/admin/payouts/process/${id}`),
+    allUsers:        ()       => API.get('/admin/users'),
+    deleteUser:      (id)     => API.delete(`/admin/users/${id}`),
+    restoreUser:     (id)     => API.post(`/admin/users/${id}/restore`),
+    suspendSeller:   (id)     => API.post(`/admin/sellers/${id}/suspend`),
+    allDocuments:    ()       => API.get('/admin/documents/all'),
+    deleteDocument:  (id)     => API.delete(`/admin/documents/${id}`),
+    restoreDocument: (id)     => API.post(`/admin/documents/${id}/restore`),
   },
 
   // Misc

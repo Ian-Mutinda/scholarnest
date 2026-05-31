@@ -129,6 +129,37 @@ router.get('/:id/page/:pageNum', async (req, res) => {
   const { id, pageNum } = req.params;
   const { code } = req.query;
 
+  // Admins bypass access code check
+const token = req.cookies?.token || req.headers.authorization?.replace('Bearer ', '');
+if (token) {
+  try {
+    const jwt = require('jsonwebtoken');
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const { rows } = await db.query(
+      'SELECT u.role, d.seller_id FROM users u, documents d WHERE u.id = $1 AND d.id = $2',
+      [decoded.id, id]
+    );
+    const isAdmin = rows[0]?.role === 'admin';
+    const isOwnDocument = rows[0]?.seller_id === decoded.id;
+
+    if (isAdmin || isOwnDocument) {
+      const pageNumber = parseInt(pageNum);
+      const { rows: docRows } = await db.query(
+        'SELECT file_path, total_pages FROM documents WHERE id = $1', [id]
+      );
+      if (!docRows[0]) return res.status(404).json({ error: 'Document not found' });
+      const imagePath = await getPageImage(id, pageNumber);
+      if (!imagePath || !fs.existsSync(imagePath)) {
+        return res.status(404).json({ error: 'Page not available' });
+      }
+      const label = isAdmin ? 'ADMIN PREVIEW' : 'SELLER PREVIEW';
+      const watermarkedBuffer = await addWatermark(imagePath, label);
+      res.set({ 'Content-Type': 'image/jpeg', 'Cache-Control': 'no-store' });
+      return res.send(watermarkedBuffer);
+    }
+  } catch {}
+}
+
   if (!code) return res.status(401).json({ error: 'Access code required' });
 
   const fingerprint = extractFingerprint(req);
@@ -178,8 +209,7 @@ router.get('/:id/page/:pageNum', async (req, res) => {
 router.post('/', auth, requireSeller, upload.single('document'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
-  const { title, description, course_code, year, department_id, doc_type, price_individual } = req.body;
-
+ const { title, description, course_code, year, department_id, doc_type, price_individual, lecturer_name, semester } = req.body;
   try {
     // Get seller's university
     const { rows: userRows } = await db.query(
@@ -190,13 +220,13 @@ router.post('/', auth, requireSeller, upload.single('document'), async (req, res
     const { rows } = await db.query(`
       INSERT INTO documents
         (seller_id, university_id, department_id, title, description,
-         course_code, year, file_path, doc_type, price_individual, file_size_bytes)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+       course_code, year, file_path, doc_type, price_individual, file_size_bytes, lecturer_name, semester)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
       RETURNING id
     `, [
       req.user.id, universityId, department_id, title, description,
       course_code, year, req.file.path, doc_type || 'notes',
-      price_individual || null, req.file.size,
+      price_individual || null, req.file.size, lecturer_name || null, semester || null,
     ]);
 
     const docId = rows[0].id;

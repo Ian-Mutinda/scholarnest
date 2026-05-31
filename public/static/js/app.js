@@ -30,7 +30,6 @@ function bindStaticListeners() {
   document.getElementById('notif-btn').addEventListener('click', toggleNotifications);
   document.getElementById('user-avatar-btn').addEventListener('click', toggleUserMenu);
   document.getElementById('mark-all-read-btn').addEventListener('click', markAllRead);
-  
 
   // User menu
   document.getElementById('menu-my-codes').addEventListener('click', () => navigate('my-codes'));
@@ -103,14 +102,14 @@ function bindStaticListeners() {
   document.getElementById('modal-close-btn').addEventListener('click', closePaymentModal);
   document.getElementById('pay-btn').addEventListener('click', initiatePayment);
   document.getElementById('payment-modal').addEventListener('click', function(e) {
-  if (e.target === this) closePaymentModal();
-});
-  
+    if (e.target === this) closePaymentModal();
+  });
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') closePaymentModal();
+  });
 
   // Close dropdowns on outside click
-   document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') closePaymentModal();});
-   document.addEventListener('click', e => {
+  document.addEventListener('click', e => {
     if (!e.target.closest('#notif-btn') && !e.target.closest('#notif-panel')) {
       document.getElementById('notif-panel').hidden = true;
     }
@@ -205,7 +204,7 @@ async function doLogin() {
     errEl.textContent = err.message;
     errEl.hidden = false;
   } finally {
-    btn.disabled = false; btn.textContent = 'Log in';
+    btn.disabled = false; btn.innerHTML = 'Log in';
   }
 }
 
@@ -437,7 +436,8 @@ function renderPasses(passes) {
 // ─── Document detail ──────────────────────────────────────────────────────────
 async function loadDocumentDetail(docId) {
   const container = document.getElementById('doc-detail-content');
-  container.innerHTML = '<div class="empty-state"><i class="ti ti-loader ti-spin"></i></div>';
+  container.innerHTML = '<div class="empty-state"><i data-lucide="loader" class="lucide-spin"></i></div>';
+  if (window.lucide) window.lucide.createIcons();
 
   try {
     const doc = await API.docs.get(docId);
@@ -447,7 +447,7 @@ async function loadDocumentDetail(docId) {
       <div class="doc-detail-grid">
         <div class="doc-preview-pane">
           <img src="${API.docs.preview(docId)}" alt="Preview" onerror="this.style.display='none'" />
-          <div class="doc-preview-note"><i class="ti ti-eye"></i> First page preview only</div>
+          <div class="doc-preview-note"><i data-lucide="eye"></i> First page preview only</div>
         </div>
         <div class="doc-info-pane">
           <div class="doc-badges">
@@ -455,6 +455,7 @@ async function loadDocumentDetail(docId) {
             <span class="badge">${escHtml(doc.department_name)}</span>
             <span class="badge">${doc.doc_type.replace('_', ' ')}</span>
             ${doc.course_code ? `<span class="badge">${escHtml(doc.course_code)}</span>` : ''}
+            ${doc.lecturer_name ? `<span class="badge">Lec: ${escHtml(doc.lecturer_name)}</span>` : ''}
             ${doc.is_premium ? '<span class="badge badge-accent">★ Premium</span>' : ''}
           </div>
           <h1>${escHtml(doc.title)}</h1>
@@ -470,45 +471,84 @@ async function loadDocumentDetail(docId) {
             <div class="doc-price-sub">One-time purchase · 7-day device-locked access</div>
           </div>
           <div class="doc-actions">
-            ${State.user
+            ${State.user?.role === 'admin'
+              ? `<button class="btn btn-primary" id="admin-view-btn" data-id="${doc.id}">
+                   <i data-lucide="eye"></i> View as admin
+                 </button>`
+              : State.user?.id === doc.seller_id
+              ? `<button class="btn btn-primary" id="seller-preview-btn" data-id="${doc.id}">
+                   <i data-lucide="eye"></i> Preview my document
+                 </button>`
+              : State.user
               ? `<button class="btn btn-primary" id="buy-doc-btn" data-id="${doc.id}" data-price="${doc.price_individual}" data-title="${escHtml(doc.title)}">
-                   <i class="ti ti-lock-open"></i> Buy access — KSh ${doc.price_individual}
+                   <i data-lucide="lock-open"></i> Buy access — KSh ${doc.price_individual}
                  </button>`
               : `<button class="btn btn-primary" id="signup-to-buy-btn">
-                   <i class="ti ti-user-plus"></i> Sign up to purchase
+                   <i data-lucide="user-plus"></i> Sign up to purchase
                  </button>`
             }
             <button class="btn btn-ghost" id="have-code-btn">
-              <i class="ti ti-key"></i> I already have a code
+              <i data-lucide="key-round"></i> I already have a code
             </button>
           </div>
           <div style="margin-top:16px;font-size:12px;color:var(--muted);display:flex;flex-direction:column;gap:4px;">
-            <span><i class="ti ti-shield-check" style="color:var(--accent)"></i> Access code locked to your device only</span>
-            <span><i class="ti ti-eye-off" style="color:var(--accent)"></i> Documents served as images — not downloadable</span>
-            <span><i class="ti ti-writing-sign" style="color:var(--accent)"></i> Personalized watermark on every page</span>
+            <span><i data-lucide="shield-check" style="color:var(--accent)"></i> Access code locked to your device only</span>
+            <span><i data-lucide="eye-off" style="color:var(--accent)"></i> Documents served as images — not downloadable</span>
+            <span><i data-lucide="pen-line" style="color:var(--accent)"></i> Personalized watermark on every page</span>
           </div>
         </div>
       </div>`;
 
+    if (window.lucide) window.lucide.createIcons();
+
     // Bind buttons after render
+    document.getElementById('admin-view-btn')?.addEventListener('click', function() {
+      State.viewer.code = 'ADMIN';
+      State.viewer.docId = this.dataset.id;
+      navigate('viewer', this.dataset.id);
+    });
+    document.getElementById('seller-preview-btn')?.addEventListener('click', function() {
+      State.viewer.code = 'SELLER';
+      State.viewer.docId = this.dataset.id;
+      navigate('viewer', this.dataset.id);
+    });
     document.getElementById('buy-doc-btn')?.addEventListener('click', function() {
       openPaymentModal('individual', null, this.dataset.id, this.dataset.price, this.dataset.title);
     });
     document.getElementById('signup-to-buy-btn')?.addEventListener('click', () => navigate('register'));
     document.getElementById('have-code-btn')?.addEventListener('click', () => navigate('access'));
   } catch (err) {
-    container.innerHTML = `<div class="empty-state"><i class="ti ti-file-off"></i><p>${err.message}</p></div>`;
+    container.innerHTML = `<div class="empty-state"><i data-lucide="file-x"></i><p>${err.message}</p></div>`;
+    if (window.lucide) window.lucide.createIcons();
   }
 }
-
 // ─── Viewer ───────────────────────────────────────────────────────────────────
 async function openViewer(docId, code) {
-  if (!code) { navigate('access'); return; }
+  if (!code && State.user?.role !== 'admin' && State.viewer.code !== 'SELLER') {
+    navigate('access'); return;
+  }
 
   State.viewer.docId = docId;
-  State.viewer.code = code;
+  State.viewer.code = code || State.viewer.code;
   State.viewer.page = 1;
   State.viewer.zoom = 100;
+
+  // Admin or seller bypass — skip code validation
+  if (State.user?.role === 'admin' || State.viewer.code === 'SELLER') {
+    try {
+      const doc = await API.docs.get(docId);
+      State.viewer.totalPages = doc.total_pages || 1;
+      document.getElementById('viewer-title').textContent = doc.title;
+      document.getElementById('viewer-subtitle').textContent =
+        State.user?.role === 'admin' ? 'Admin preview — all pages' : 'Seller preview — your document';
+      renderViewerPages();
+      loadViewerPage(1);
+      return;
+    } catch (err) {
+      showToast('Failed to open document');
+      return;
+    }
+  }
 
   try {
     const result = await API.payments.validateCode({ code, document_id: docId });
@@ -634,25 +674,39 @@ async function submitAccessCode() {
   const btn = document.getElementById('unlock-btn');
   errEl.hidden = true;
 
-  if (code.length < 12) { errEl.textContent = 'Please enter a complete code'; errEl.hidden = false; return; }
+  if (code.length < 12) { 
+    errEl.textContent = 'Please enter a complete code'; 
+    errEl.hidden = false; 
+    return; 
+  }
 
   btn.disabled = true;
-  btn.innerHTML = '<i class="ti ti-loader ti-spin"></i> Validating…';
+  btn.innerHTML = '<i data-lucide="loader" class="lucide-spin"></i> Validating…';
+  if (window.lucide) window.lucide.createIcons();
 
   try {
     const result = await API.payments.validateCode({ code });
     State.viewer.code = code;
+    State.viewer.docId = result.documentId;
+
+    if (!result.documentId) {
+      errEl.textContent = 'Code found but no document linked. Please contact support.';
+      errEl.hidden = false;
+      return;
+    }
+
     showToast(result.firstBind ? 'Code activated on this device!' : 'Code verified!');
-    navigate('viewer', result.documentId || 'doc');
+    navigate('viewer', result.documentId);
   } catch (err) {
     document.getElementById('access-code-input').classList.add('error');
-    errEl.textContent = err.message; errEl.hidden = false;
+    errEl.textContent = err.message; 
+    errEl.hidden = false;
   } finally {
     btn.disabled = false;
-    btn.innerHTML = '<i class="ti ti-lock-open"></i> Unlock document';
+    btn.innerHTML = '<i data-lucide="lock-open"></i> Unlock document';
+    if (window.lucide) window.lucide.createIcons();
   }
 }
-
 // ─── My Codes ─────────────────────────────────────────────────────────────────
 async function loadMyCodes() {
   const list = document.getElementById('my-codes-list');
@@ -837,12 +891,60 @@ async function loadSellerDashboard() {
 // ─── Upload ───────────────────────────────────────────────────────────────────
 async function loadUploadForm() {
   if (!State.user) return;
+
+  // Populate year dropdown dynamically
+  const yearSel = document.getElementById('up-year');
+  if (yearSel) {
+    const currentYear = new Date().getFullYear();
+    yearSel.innerHTML = '';
+    for (let y = currentYear; y >= 2018; y--) {
+      yearSel.innerHTML += `<option value="${y}">${y}</option>`;
+    }
+  }
+
+  // Clone university select to remove stale listeners
+  const uniSelOld = document.getElementById('up-university');
+  if (!uniSelOld) return;
+  const uniSel = uniSelOld.cloneNode(false);
+  uniSelOld.parentNode.replaceChild(uniSel, uniSelOld);
+
   const deptSel = document.getElementById('up-department');
-  deptSel.innerHTML = '<option value="">Select department…</option>';
+  uniSel.innerHTML = '<option value="">Select university…</option>';
+  deptSel.innerHTML = '<option value="">Select university first…</option>';
+
   try {
-    const depts = await API.departments(State.user.university_id);
-    depts.forEach(d => { deptSel.innerHTML += `<option value="${d.id}">${d.name}</option>`; });
-  } catch {}
+    const unis = await API.universities();
+    unis.forEach(u => {
+      uniSel.innerHTML += `<option value="${u.id}">${u.name} (${u.short_name})</option>`;
+    });
+
+    if (State.user.university_id) {
+      uniSel.value = String(State.user.university_id);
+      await loadUploadDepartments(State.user.university_id);
+    }
+  } catch(err) {
+    console.error('Failed to load universities:', err);
+    uniSel.innerHTML = '<option value="">Failed to load — refresh page</option>';
+  }
+
+  uniSel.addEventListener('change', function() {
+    if (this.value) loadUploadDepartments(this.value);
+    else document.getElementById('up-department').innerHTML = '<option value="">Select university first…</option>';
+  });
+}
+
+async function loadUploadDepartments(universityId) {
+  const deptSel = document.getElementById('up-department');
+  deptSel.innerHTML = '<option value="">Loading…</option>';
+  try {
+    const depts = await API.departments(universityId);
+    deptSel.innerHTML = '<option value="">Select department…</option>';
+    depts.forEach(d => {
+      deptSel.innerHTML += `<option value="${d.id}">${d.name}</option>`;
+    });
+  } catch {
+    deptSel.innerHTML = '<option value="">Failed to load departments</option>';
+  }
 }
 
 let _uploadFile = null;
@@ -862,12 +964,16 @@ async function submitUpload() {
   const year = document.getElementById('up-year').value;
   const price = document.getElementById('up-price').value;
   const desc = document.getElementById('up-description').value.trim();
+  const lecturer = document.getElementById('up-lecturer')?.value.trim() || '';
+  const semester = document.getElementById('up-semester')?.value || '';
+  const uniId = document.getElementById('up-university')?.value || '';
   const errEl = document.getElementById('upload-error');
   const btn = document.getElementById('upload-btn');
 
   errEl.hidden = true;
   if (!_uploadFile) { errEl.textContent = 'Please select a file'; errEl.hidden = false; return; }
   if (!title) { errEl.textContent = 'Title is required'; errEl.hidden = false; return; }
+  if (!uniId) { errEl.textContent = 'Please select a university'; errEl.hidden = false; return; }
   if (!deptId) { errEl.textContent = 'Please select a department'; errEl.hidden = false; return; }
 
   const form = new FormData();
@@ -875,13 +981,16 @@ async function submitUpload() {
   form.append('title', title);
   form.append('course_code', course);
   form.append('department_id', deptId);
+  form.append('university_id', uniId);
   form.append('doc_type', type);
   form.append('year', year);
   form.append('price_individual', price);
   form.append('description', desc);
+  form.append('lecturer_name', lecturer);
+  form.append('semester', semester);
 
   btn.disabled = true;
-  btn.innerHTML = '<i class="ti ti-loader ti-spin"></i> Uploading…';
+  btn.innerHTML = '<i data-lucide="loader" class="lucide-spin"></i> Uploading…'; if(window.lucide) window.lucide.createIcons();
 
   try {
     await API.docs.upload(form);
@@ -896,7 +1005,7 @@ async function submitUpload() {
     errEl.textContent = err.message; errEl.hidden = false;
   } finally {
     btn.disabled = false;
-    btn.innerHTML = '<i class="ti ti-upload"></i> Submit for review';
+    btn.innerHTML = '<i data-lucide="upload"></i> Submit for review'; if(window.lucide) window.lucide.createIcons();
   }
 }
 
@@ -993,6 +1102,8 @@ function switchAdminTab(tab, btn) {
   if (tab === 'sellers') loadAdminSellers();
   if (tab === 'documents') loadAdminDocs();
   if (tab === 'payouts') loadAdminPayouts();
+  if (tab === 'all-users') loadAdminUsers();
+  if (tab === 'all-documents') loadAdminAllDocuments();
 }
 
 async function adminApproveSeller(id) {
@@ -1151,3 +1262,168 @@ const _iconObserver = new MutationObserver(() => {
   }
 });
 _iconObserver.observe(document.getElementById('app'), { childList: true, subtree: true });
+
+// ─── Admin: All users ─────────────────────────────────────────────────────────
+let _allUsersData = [];
+let _userSearch = '';
+
+async function loadAdminUsers() {
+  const list = document.getElementById('admin-users-list');
+  list.innerHTML = `
+    <div style="margin-bottom:12px">
+      <input type="text" id="user-search-input" class="field-input" placeholder="Search by name or email…" style="max-width:320px" />
+    </div>
+    <div id="users-list-inner"><div class="empty-state-sm">Loading…</div></div>`;
+
+  document.getElementById('user-search-input').addEventListener('input', function() {
+    _userSearch = this.value.toLowerCase();
+    renderUsersList();
+  });
+
+  _allUsersData = await API.admin.allUsers().catch(() => []);
+  renderUsersList();
+}
+
+function renderUsersList() {
+  const list = document.getElementById('users-list-inner');
+  const filtered = _userSearch
+    ? _allUsersData.filter(u =>
+        u.full_name.toLowerCase().includes(_userSearch) ||
+        u.email.toLowerCase().includes(_userSearch)
+      )
+    : _allUsersData;
+
+  if (!filtered.length) { list.innerHTML = '<div class="empty-state-sm">No users found</div>'; return; }
+
+  list.innerHTML = filtered.map(u => `
+    <div class="admin-row">
+      <div class="admin-row-info">
+        <div class="admin-row-title">${escHtml(u.full_name)}
+          <span class="doc-status-badge ${u.is_active ? 'status-approved' : 'status-rejected'}">${u.is_active ? 'active' : 'deactivated'}</span>
+          <span class="doc-status-badge status-pending">${u.role}</span>
+        </div>
+        <div class="admin-row-sub">${escHtml(u.email)} · ${escHtml(u.university_name || '—')} · Joined ${relativeTime(u.created_at)}</div>
+      </div>
+      <div class="admin-row-actions">
+        ${u.is_active
+          ? `<button class="btn btn-sm btn-danger deactivate-user-btn" data-id="${u.id}">Deactivate</button>`
+          : `<button class="btn btn-sm btn-primary restore-user-btn" data-id="${u.id}">Restore</button>`
+        }
+        ${u.role === 'seller' && u.seller_status === 'approved'
+          ? `<button class="btn btn-sm btn-ghost suspend-seller-btn" data-id="${u.id}">Suspend</button>`
+          : ''
+        }
+      </div>
+    </div>`).join('');
+
+  list.querySelectorAll('.deactivate-user-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (!confirm('Deactivate this user?')) return;
+      await API.admin.deleteUser(btn.dataset.id).catch(err => showToast(err.message));
+      showToast('User deactivated');
+      _allUsersData = await API.admin.allUsers().catch(() => []);
+      renderUsersList();
+    });
+  });
+  list.querySelectorAll('.restore-user-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      await API.admin.restoreUser(btn.dataset.id).catch(err => showToast(err.message));
+      showToast('User restored');
+      _allUsersData = await API.admin.allUsers().catch(() => []);
+      renderUsersList();
+    });
+  });
+  list.querySelectorAll('.suspend-seller-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (!confirm('Suspend this seller?')) return;
+      await API.admin.suspendSeller(btn.dataset.id).catch(err => showToast(err.message));
+      showToast('Seller suspended');
+      _allUsersData = await API.admin.allUsers().catch(() => []);
+      renderUsersList();
+    });
+  });
+}
+
+// ─── Admin: All documents ─────────────────────────────────────────────────────
+let _allDocsData = [];
+let _docSearch = '';
+
+async function loadAdminAllDocuments() {
+  const list = document.getElementById('admin-all-docs-list');
+  list.innerHTML = `
+    <div style="margin-bottom:12px">
+      <input type="text" id="doc-search-input" class="field-input" placeholder="Search by title, seller, lecturer…" style="max-width:400px" />
+    </div>
+    <div id="docs-list-inner"><div class="empty-state-sm">Loading…</div></div>`;
+
+  document.getElementById('doc-search-input').addEventListener('input', function() {
+    _docSearch = this.value.toLowerCase();
+    renderDocsList();
+  });
+
+  _allDocsData = await API.admin.allDocuments().catch(() => []);
+  renderDocsList();
+}
+
+function renderDocsList() {
+  const list = document.getElementById('docs-list-inner');
+  const filtered = _docSearch
+    ? _allDocsData.filter(d =>
+        d.title.toLowerCase().includes(_docSearch) ||
+        d.seller_name.toLowerCase().includes(_docSearch) ||
+        (d.lecturer_name || '').toLowerCase().includes(_docSearch) ||
+        (d.course_code || '').toLowerCase().includes(_docSearch)
+      )
+    : _allDocsData;
+
+  if (!filtered.length) { list.innerHTML = '<div class="empty-state-sm">No documents found</div>'; return; }
+
+  list.innerHTML = filtered.map(d => `
+    <div class="admin-row">
+      <div class="admin-row-info">
+        <div class="admin-row-title">${escHtml(d.title)}
+          <span class="doc-status-badge status-${d.status}">${d.status}</span>
+          ${!d.is_active ? '<span class="doc-status-badge status-rejected">removed</span>' : ''}
+        </div>
+        <div class="admin-row-sub">
+          ${escHtml(d.seller_name)} · ${escHtml(d.university)} ·
+          ${d.lecturer_name ? 'Lec: ' + escHtml(d.lecturer_name) + ' · ' : ''}
+          ${d.total_purchases} sales · Plagiarism: ${d.plagiarism_score}%
+        </div>
+      </div>
+      <div class="admin-row-actions">
+        ${d.is_active
+          ? `<button class="btn btn-sm btn-primary admin-view-doc-btn" data-id="${d.id}">View</button>
+             <button class="btn btn-sm btn-danger delete-doc-btn" data-id="${d.id}">Remove</button>`
+          : `<button class="btn btn-sm btn-ghost restore-doc-btn" data-id="${d.id}" data-seller="${escHtml(d.seller_name)}">Restore</button>`
+        }
+      </div>
+    </div>`).join('');
+
+  list.querySelectorAll('.admin-view-doc-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      State.viewer.code = 'ADMIN';
+      navigate('viewer', btn.dataset.id);
+    });
+  });
+
+  list.querySelectorAll('.delete-doc-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (!confirm('Remove this document from the marketplace?')) return;
+      await API.admin.deleteDocument(btn.dataset.id).catch(err => showToast(err.message));
+      showToast('Document removed');
+      _allDocsData = await API.admin.allDocuments().catch(() => []);
+      renderDocsList();
+    });
+  });
+
+  list.querySelectorAll('.restore-doc-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (!confirm(`Restore document from ${btn.dataset.seller}?`)) return;
+      await API.admin.restoreDocument(btn.dataset.id).catch(err => showToast(err.message));
+      showToast('Document restored and live again');
+      _allDocsData = await API.admin.allDocuments().catch(() => []);
+      renderDocsList();
+    });
+  });
+}

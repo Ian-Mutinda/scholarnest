@@ -300,6 +300,46 @@ INSERT INTO departments (university_id, name, slug) VALUES
   (2, 'Economics', 'econ')
 ON CONFLICT DO NOTHING;
 
+-- Departments for MKU (university_id = 3)
+INSERT INTO departments (university_id, name, slug) VALUES
+  (3, 'Computer Science', 'cs'),
+  (3, 'Business Administration', 'biz'),
+  (3, 'Engineering', 'eng'),
+  (3, 'Medicine', 'med'),
+  (3, 'Law', 'law'),
+  (3, 'Economics', 'econ')
+ON CONFLICT DO NOTHING;
+
+-- Departments for Strathmore (university_id = 4)
+INSERT INTO departments (university_id, name, slug) VALUES
+  (4, 'Computer Science', 'cs'),
+  (4, 'Business Administration', 'biz'),
+  (4, 'Engineering', 'eng'),
+  (4, 'Medicine', 'med'),
+  (4, 'Law', 'law'),
+  (4, 'Economics', 'econ')
+ON CONFLICT DO NOTHING;
+
+-- Departments for JKUAT (university_id = 5)
+INSERT INTO departments (university_id, name, slug) VALUES
+  (5, 'Computer Science', 'cs'),
+  (5, 'Business Administration', 'biz'),
+  (5, 'Engineering', 'eng'),
+  (5, 'Medicine', 'med'),
+  (5, 'Law', 'law'),
+  (5, 'Economics', 'econ')
+ON CONFLICT DO NOTHING;
+
+-- Departments for Daystar (university_id = 6)
+INSERT INTO departments (university_id, name, slug) VALUES
+  (6, 'Computer Science', 'cs'),
+  (6, 'Business Administration', 'biz'),
+  (6, 'Engineering', 'eng'),
+  (6, 'Medicine', 'med'),
+  (6, 'Law', 'law'),
+  (6, 'Economics', 'econ')
+ON CONFLICT DO NOTHING;
+
 -- Department passes for KU
 INSERT INTO department_passes (university_id, department_id, name, duration_hours, price) VALUES
   (1, 1, 'KU Computer Science — 24hr Pass', 24, 50),

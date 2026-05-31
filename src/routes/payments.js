@@ -132,6 +132,7 @@ router.post('/validate-code', async (req, res) => {
   res.json({
     valid: true,
     firstBind: result.firstBind,
+    documentId: result.record?.document_id,
     documentTitle: result.record?.title,
     totalPages: result.record?.total_pages,
     expiresAt: result.record?.expires_at,

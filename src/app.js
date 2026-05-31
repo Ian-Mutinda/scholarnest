@@ -63,7 +63,7 @@ app.use('/api/seller', require('./routes/seller'));
 app.use('/api/admin', require('./routes/admin'));
 
 // Universities & departments (public)
-app.use('/api/universities', async (req, res) => {
+app.get('/api/universities', async (req, res) => {
   const db = require('../config/db');
   const { rows } = await db.query('SELECT * FROM universities WHERE is_active = true ORDER BY name');
   res.json(rows);

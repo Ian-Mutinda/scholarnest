@@ -150,7 +150,7 @@ async function completePurchase(request, mpesaReceipt, phone, amount) {
     if (request.purchase_type === 'dept_pass') codeType = 'dept_pass';
 
     // Create access code
-    const { createCodesForPurchase } = require('../../utils/accessCodes');
+   const { createCodesForPurchase } = require('../utils/accessCodes');
     const codes = await createCodesForPurchase({
       buyerId: request.buyer_id,
       documentId: request.document_id,

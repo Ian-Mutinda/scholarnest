@@ -11,7 +11,7 @@ router.get('/stats', async (req, res) => {
   try {
     const [users, docs, purchases, revenue, pendingDocs, pendingSellers] = await Promise.all([
       db.query('SELECT COUNT(*) FROM users WHERE role != $1', ['admin']),
-      db.query('SELECT COUNT(*) FROM documents WHERE status = $1', ['approved']),
+      db.query('SELECT COUNT(*) FROM documents WHERE status = $1 AND is_active = true', ['approved']),
       db.query('SELECT COUNT(*) FROM purchases WHERE payment_status = $1', ['completed']),
       db.query('SELECT SUM(platform_cut) as total FROM purchases WHERE payment_status = $1', ['completed']),
       db.query('SELECT COUNT(*) FROM documents WHERE status = $1', ['pending']),
@@ -205,6 +205,84 @@ router.post('/departments', async (req, res) => {
     [university_id, name, slug]
   );
   res.status(201).json(rows[0]);
+});
+
+
+// ─── All users ──────────────────────────────────────────────────────────────
+router.get('/users', async (req, res) => {
+  try {
+    const { rows } = await db.query(`
+      SELECT u.id, u.email, u.full_name, u.role, u.seller_status,
+             u.is_active, u.created_at, u.last_login,
+             un.name as university_name
+      FROM users u
+      LEFT JOIN universities un ON un.id = u.university_id
+      ORDER BY u.created_at DESC
+    `);
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: 'Failed to fetch users' }); }
+});
+
+router.delete('/users/:id', async (req, res) => {
+  try {
+    if (parseInt(req.params.id) === req.user.id)
+      return res.status(400).json({ error: 'Cannot deactivate your own account' });
+    await db.query('UPDATE users SET is_active = false WHERE id = $1', [req.params.id]);
+    await db.query('INSERT INTO admin_logs (admin_id, action, target_type, target_id) VALUES ($1, $2, $3, $4)',
+      [req.user.id, 'deactivate_user', 'user', req.params.id]);
+    res.json({ message: 'User deactivated' });
+  } catch (err) { res.status(500).json({ error: 'Failed to deactivate user' }); }
+});
+
+router.post('/users/:id/restore', async (req, res) => {
+  try {
+    await db.query('UPDATE users SET is_active = true WHERE id = $1', [req.params.id]);
+    res.json({ message: 'User restored' });
+  } catch (err) { res.status(500).json({ error: 'Failed to restore user' }); }
+});
+
+// ─── All documents ──────────────────────────────────────────────────────────
+router.get('/documents/all', async (req, res) => {
+  try {
+    const { rows } = await db.query(`
+      SELECT d.id, d.title, d.status, d.is_active, d.created_at,
+             d.plagiarism_score, d.total_purchases,
+             d.lecturer_name, d.course_code,
+             u.full_name as seller_name,
+             un.short_name as university
+      FROM documents d
+      JOIN users u ON u.id = d.seller_id
+      JOIN universities un ON un.id = d.university_id
+      ORDER BY d.created_at DESC
+    `);
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: 'Failed to fetch documents' }); }
+});
+
+router.delete('/documents/:id', async (req, res) => {
+  try {
+    await db.query('UPDATE documents SET is_active = false WHERE id = $1', [req.params.id]);
+    await db.query('INSERT INTO admin_logs (admin_id, action, target_type, target_id) VALUES ($1, $2, $3, $4)',
+      [req.user.id, 'delete_document', 'document', req.params.id]);
+    res.json({ message: 'Document removed' });
+  } catch (err) { res.status(500).json({ error: 'Failed to remove document' }); }
+});
+
+router.post('/documents/:id/restore', async (req, res) => {
+  try {
+    await db.query('UPDATE documents SET is_active = true WHERE id = $1', [req.params.id]);
+    await db.query('INSERT INTO admin_logs (admin_id, action, target_type, target_id) VALUES ($1, $2, $3, $4)',
+      [req.user.id, 'restore_document', 'document', req.params.id]);
+    res.json({ message: 'Document restored' });
+  } catch (err) { res.status(500).json({ error: 'Failed to restore document' }); }
+});
+
+// ─── Suspend seller ──────────────────────────────────────────────────────────
+router.post('/sellers/:id/suspend', async (req, res) => {
+  try {
+    await db.query(`UPDATE users SET seller_status = 'suspended' WHERE id = $1`, [req.params.id]);
+    res.json({ message: 'Seller suspended' });
+  } catch (err) { res.status(500).json({ error: 'Failed to suspend seller' }); }
 });
 
 module.exports = router;
