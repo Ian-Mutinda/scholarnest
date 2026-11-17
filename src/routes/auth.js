@@ -6,32 +6,48 @@ const jwt = require('jsonwebtoken');
 const { body, validationResult } = require('express-validator');
 const db = require('../../config/db');
 const { auth } = require('../middleware/auth');
+const { createWatermarkCode } = require('../utils/watermarkCode');
 
 // Register
 router.post('/register', [
   body('email').isEmail().normalizeEmail(),
   body('password').isLength({ min: 8 }),
   body('full_name').trim().isLength({ min: 2 }),
+  body('school_id').trim().isLength({ min: 1, max: 100 }),
+  body('university_id').isInt({ min: 1 }),
+  body('department_id').isInt({ min: 1 }),
   body('phone').optional().isMobilePhone(),
 ], async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
-  const { email, password, full_name, phone, university_id, role } = req.body;
+  const { email, password, full_name, phone, university_id, department_id, school_id, role } = req.body;
 
   try {
+    const { rows: departmentRows } = await db.query(
+      'SELECT id FROM departments WHERE id = $1 AND university_id = $2 AND is_active = true',
+      [department_id, university_id]
+    );
+    if (!departmentRows[0]) return res.status(400).json({ error: 'Select a department at your university' });
+
     const existing = await db.query('SELECT id FROM users WHERE email = $1', [email]);
     if (existing.rows[0]) return res.status(409).json({ error: 'Email already registered' });
 
     const hash = await bcrypt.hash(password, 12);
+    const watermarkCode = createWatermarkCode();
     const userRole = role === 'seller' ? 'seller' : 'buyer';
     const sellerStatus = userRole === 'seller' ? 'pending' : 'none';
 
     const { rows } = await db.query(`
-      INSERT INTO users (email, password_hash, full_name, phone, university_id, role, seller_status)
-      VALUES ($1, $2, $3, $4, $5, $6, $7)
-      RETURNING id, email, full_name, role, seller_status
-    `, [email, hash, full_name, phone, university_id || null, userRole, sellerStatus]);
+      INSERT INTO users
+        (email, password_hash, full_name, phone, university_id, department_id,
+         school_id, watermark_code, role, seller_status)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      RETURNING id, email, full_name, role, seller_status, school_id, department_id, watermark_code
+    `, [
+      email, hash, full_name, phone, university_id, department_id,
+      school_id.trim().toUpperCase(), watermarkCode, userRole, sellerStatus,
+    ]);
 
     const user = rows[0];
 
@@ -54,6 +70,9 @@ router.post('/register', [
 
     res.status(201).json({ user, token, message: userRole === 'seller' ? 'Application submitted for review' : 'Account created' });
   } catch (err) {
+    if (err.code === '23505') {
+      return res.status(409).json({ error: 'Email or School ID is already registered' });
+    }
     console.error(err);
     res.status(500).json({ error: 'Registration failed' });
   }

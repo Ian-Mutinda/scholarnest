@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const db = require('../../config/db');
 const { auth, requireRole } = require('../middleware/auth');
+const { verifyWatermarkSignature } = require('../utils/watermarkCode');
 
 // All admin routes require admin role
 router.use(auth, requireRole('admin'));
@@ -76,6 +77,7 @@ router.get('/documents/pending', async (req, res) => {
   const { rows } = await db.query(`
     SELECT d.id, d.title, d.course_code, d.doc_type, d.plagiarism_score,
            d.file_size_bytes, d.total_pages, d.created_at,
+           d.privacy_scan_status, d.privacy_scan_findings, d.privacy_scan_at,
            u.full_name as seller_name, u.email as seller_email,
            un.short_name, dep.name as department
     FROM documents d
@@ -83,17 +85,32 @@ router.get('/documents/pending', async (req, res) => {
     JOIN universities un ON un.id = d.university_id
     JOIN departments dep ON dep.id = d.department_id
     WHERE d.status = 'pending'
-    ORDER BY d.created_at ASC
+       OR (d.status = 'flagged' AND d.privacy_scan_status <> 'clear')
+    ORDER BY CASE WHEN d.privacy_scan_status <> 'clear' THEN 0 ELSE 1 END, d.created_at ASC
   `);
   res.json(rows);
 });
 
 router.post('/documents/:id/approve', async (req, res) => {
-  const { rows } = await db.query(
-    `UPDATE documents SET status = 'approved', updated_at = NOW() WHERE id = $1 RETURNING seller_id, title`,
+  const { rows: pendingRows } = await db.query(
+    `SELECT privacy_scan_status FROM documents
+     WHERE id = $1 AND (status = 'pending' OR (status = 'flagged' AND privacy_scan_status <> 'clear'))
+       AND total_pages > 0`,
     [req.params.id]
   );
-  if (!rows[0]) return res.status(404).json({ error: 'Document not found' });
+  if (!pendingRows[0]) return res.status(404).json({ error: 'Document not found, not pending, or not processed' });
+  if (pendingRows[0].privacy_scan_status !== 'clear' && req.body?.privacy_reviewed !== true) {
+    return res.status(400).json({ error: 'Review the flagged pages and confirm the document is safe before approval' });
+  }
+
+  const { rows } = await db.query(
+    `UPDATE documents SET status = 'approved', privacy_reviewed = true, updated_at = NOW()
+     WHERE id = $1 AND (status = 'pending' OR (status = 'flagged' AND privacy_scan_status <> 'clear'))
+       AND total_pages > 0
+     RETURNING seller_id, title`,
+    [req.params.id]
+  );
+  if (!rows[0]) return res.status(404).json({ error: 'Document not found, not pending, or not processed' });
 
   await db.query(`
     INSERT INTO notifications (user_id, type, title, message)
@@ -104,6 +121,26 @@ router.post('/documents/:id/approve', async (req, res) => {
     [req.user.id, 'approve_document', 'document', req.params.id]);
 
   res.json({ message: 'Document approved and live' });
+});
+
+router.post('/documents/:id/privacy-review', async (req, res) => {
+  if (req.body?.privacy_reviewed !== true) {
+    return res.status(400).json({ error: 'Explicit privacy review confirmation is required' });
+  }
+
+  const { rows } = await db.query(`
+    UPDATE documents SET privacy_reviewed = true, updated_at = NOW()
+    WHERE id = $1 AND status = 'approved' AND is_active = true
+    RETURNING id
+  `, [req.params.id]);
+
+  if (!rows[0]) return res.status(404).json({ error: 'Active approved document not found' });
+
+  await db.query(
+    'INSERT INTO admin_logs (admin_id, action, target_type, target_id) VALUES ($1, $2, $3, $4)',
+    [req.user.id, 'review_document_preview', 'document', req.params.id]
+  );
+  res.json({ message: 'Public preview approved' });
 });
 
 router.post('/documents/:id/reject', async (req, res) => {
@@ -214,13 +251,79 @@ router.get('/users', async (req, res) => {
     const { rows } = await db.query(`
       SELECT u.id, u.email, u.full_name, u.role, u.seller_status,
              u.is_active, u.created_at, u.last_login,
-             un.name as university_name
+             u.school_id, u.watermark_code,
+             un.name as university_name, dep.name as department_name
       FROM users u
       LEFT JOIN universities un ON un.id = u.university_id
+      LEFT JOIN departments dep ON dep.id = u.department_id
       ORDER BY u.created_at DESC
     `);
     res.json(rows);
   } catch (err) { res.status(500).json({ error: 'Failed to fetch users' }); }
+});
+
+router.post('/watermarks/verify', async (req, res) => {
+  const watermarkCode = typeof req.body?.watermark_code === 'string'
+    ? req.body.watermark_code.trim().toUpperCase()
+    : '';
+  const signature = typeof req.body?.signature === 'string' ? req.body.signature.trim() : '';
+  const documentId = Number(req.body?.document_id);
+  const pageNumber = Number(req.body?.page);
+
+  if (!/^SN-[A-F0-9]{20}$/.test(watermarkCode) ||
+      !/^[A-F0-9]{24}$/i.test(signature) ||
+      !Number.isSafeInteger(documentId) || documentId < 1 ||
+      !Number.isSafeInteger(pageNumber) || pageNumber < 1) {
+    return res.status(400).json({ error: 'Provide a valid watermark, document ID, and page number' });
+  }
+
+  try {
+    const { rows: documentRows } = await db.query(
+      'SELECT total_pages FROM documents WHERE id = $1',
+      [documentId]
+    );
+    if (!documentRows[0] || pageNumber > documentRows[0].total_pages) {
+      return res.status(404).json({ error: 'Document page not found' });
+    }
+
+    if (!verifyWatermarkSignature(watermarkCode, documentId, pageNumber, signature)) {
+      await db.query(
+        'INSERT INTO admin_logs (admin_id, action, target_type, target_id) VALUES ($1, $2, $3, $4)',
+        [req.user.id, 'verify_watermark_invalid', 'document', documentId]
+      );
+      return res.json({ authentic: false });
+    }
+
+    const { rows: userRows } = await db.query(
+      `SELECT id, full_name, email, school_id, watermark_code
+       FROM users WHERE watermark_code = $1`,
+      [watermarkCode]
+    );
+    if (!userRows[0]) {
+      await db.query(
+        'INSERT INTO admin_logs (admin_id, action, target_type, target_id) VALUES ($1, $2, $3, $4)',
+        [req.user.id, 'verify_watermark_invalid', 'document', documentId]
+      );
+      return res.json({ authentic: false });
+    }
+
+    await db.query(
+      'INSERT INTO admin_logs (admin_id, action, target_type, target_id) VALUES ($1, $2, $3, $4)',
+      [req.user.id, 'verify_watermark', 'user', userRows[0].id]
+    );
+
+    res.json({
+      authentic: true,
+      user: {
+        full_name: userRows[0].full_name,
+        email: userRows[0].email,
+        school_id: userRows[0].school_id,
+      },
+    });
+  } catch (err) {
+    console.error('Watermark verification failed:', err);
+    res.status(500).json({ error: 'Watermark verification failed' });
+  }
 });
 
 router.delete('/users/:id', async (req, res) => {
@@ -247,7 +350,8 @@ router.get('/documents/all', async (req, res) => {
     const { rows } = await db.query(`
       SELECT d.id, d.title, d.status, d.is_active, d.created_at,
              d.plagiarism_score, d.total_purchases,
-             d.lecturer_name, d.course_code,
+             d.lecturer_name, d.course_code, d.total_pages, d.privacy_reviewed,
+             d.privacy_scan_status, d.privacy_scan_findings, d.privacy_scan_at,
              u.full_name as seller_name,
              un.short_name as university
       FROM documents d
@@ -270,7 +374,7 @@ router.delete('/documents/:id', async (req, res) => {
 
 router.post('/documents/:id/restore', async (req, res) => {
   try {
-    await db.query('UPDATE documents SET is_active = true WHERE id = $1', [req.params.id]);
+    await db.query('UPDATE documents SET is_active = true, privacy_reviewed = false WHERE id = $1', [req.params.id]);
     await db.query('INSERT INTO admin_logs (admin_id, action, target_type, target_id) VALUES ($1, $2, $3, $4)',
       [req.user.id, 'restore_document', 'document', req.params.id]);
     res.json({ message: 'Document restored' });

@@ -8,8 +8,9 @@ const { auth, requireSeller, optionalAuth } = require('../middleware/auth');
 const { processDocument, getPageImage, addWatermark } = require('../services/documentProcessor');
 const { checkPlagiarism, shouldAutoReject } = require('../services/plagiarism');
 const { validateAndBindCode, extractFingerprint } = require('../utils/accessCodes');
+const { createWatermarkLabel } = require('../utils/watermarkCode');
 
-const UPLOAD_DIR = process.env.UPLOAD_DIR || './public/uploads/documents';
+const UPLOAD_DIR = process.env.UPLOAD_DIR || path.resolve(__dirname, '../../storage/documents');
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
 const storage = multer.diskStorage({
@@ -24,11 +25,12 @@ const upload = multer({
   storage,
   limits: { fileSize: (parseInt(process.env.MAX_FILE_SIZE_MB) || 50) * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
-    const allowed = ['.pdf', '.docx', '.pptx'];
-    if (allowed.includes(path.extname(file.originalname).toLowerCase())) {
+    if (path.extname(file.originalname).toLowerCase() === '.pdf') {
       cb(null, true);
     } else {
-      cb(new Error('Only PDF, DOCX, and PPTX files are allowed'));
+      const error = new Error('Only PDF files are supported');
+      error.code = 'UNSUPPORTED_FILE_TYPE';
+      cb(error);
     }
   },
 });
@@ -80,7 +82,7 @@ router.get('/:id', optionalAuth, async (req, res) => {
     const { rows } = await db.query(`
       SELECT d.*, u.full_name as seller_name, u.trust_score,
              u.avatar_url as seller_avatar,
-             un.name as university_name, un.short_name,
+             un.name as university_name, un.short_name as university_short,
              dep.name as department_name
       FROM documents d
       JOIN users u ON u.id = d.seller_id
@@ -99,26 +101,37 @@ router.get('/:id', optionalAuth, async (req, res) => {
   }
 });
 
-// Preview page (page 1, no auth needed, no watermark)
-router.get('/:id/preview', async (req, res) => {
+// First-page previews require a signed-in user and an administrator privacy review.
+router.get('/:id/preview', auth, async (req, res) => {
   try {
     const { rows } = await db.query(
-      'SELECT id, total_pages FROM documents WHERE id = $1 AND status = $2',
+      `SELECT id, total_pages FROM documents
+       WHERE id = $1 AND status = $2 AND is_active = true AND privacy_reviewed = true`,
       [req.params.id, 'approved']
     );
     if (!rows[0]) return res.status(404).json({ error: 'Not found' });
+
+    const { rows: userRows } = await db.query(
+      'SELECT watermark_code FROM users WHERE id = $1',
+      [req.user.id]
+    );
+    if (!userRows[0]?.watermark_code) {
+      return res.status(500).json({ error: 'Watermark identity is unavailable' });
+    }
 
     const imagePath = await getPageImage(req.params.id, 1);
     if (!imagePath || !fs.existsSync(imagePath)) {
       return res.status(404).json({ error: 'Preview not available' });
     }
 
+    const watermarkLabel = createWatermarkLabel(userRows[0].watermark_code, Number(req.params.id), 1);
+    const watermarkedBuffer = await addWatermark(imagePath, watermarkLabel);
     res.set({
       'Content-Type': 'image/jpeg',
-      'Cache-Control': 'public, max-age=3600',
+      'Cache-Control': 'no-store',
       'X-Robots-Tag': 'noindex',
     });
-    res.sendFile(path.resolve(imagePath));
+    res.send(watermarkedBuffer);
   } catch (err) {
     res.status(500).json({ error: 'Preview failed' });
   }
@@ -136,24 +149,30 @@ if (token) {
     const jwt = require('jsonwebtoken');
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     const { rows } = await db.query(
-      'SELECT u.role, d.seller_id FROM users u, documents d WHERE u.id = $1 AND d.id = $2',
+      'SELECT u.role, u.watermark_code, d.seller_id FROM users u, documents d WHERE u.id = $1 AND d.id = $2',
       [decoded.id, id]
     );
     const isAdmin = rows[0]?.role === 'admin';
     const isOwnDocument = rows[0]?.seller_id === decoded.id;
 
     if (isAdmin || isOwnDocument) {
+      if (!rows[0].watermark_code) {
+        return res.status(500).json({ error: 'Watermark identity is unavailable' });
+      }
       const pageNumber = parseInt(pageNum);
       const { rows: docRows } = await db.query(
         'SELECT file_path, total_pages FROM documents WHERE id = $1', [id]
       );
       if (!docRows[0]) return res.status(404).json({ error: 'Document not found' });
+      if (pageNumber < 1 || pageNumber > docRows[0].total_pages) {
+        return res.status(400).json({ error: 'Invalid page number' });
+      }
       const imagePath = await getPageImage(id, pageNumber);
       if (!imagePath || !fs.existsSync(imagePath)) {
         return res.status(404).json({ error: 'Page not available' });
       }
-      const label = isAdmin ? 'ADMIN PREVIEW' : 'SELLER PREVIEW';
-      const watermarkedBuffer = await addWatermark(imagePath, label);
+      const watermarkLabel = createWatermarkLabel(rows[0].watermark_code, Number(id), pageNumber);
+      const watermarkedBuffer = await addWatermark(imagePath, watermarkLabel);
       res.set({ 'Content-Type': 'image/jpeg', 'Cache-Control': 'no-store' });
       return res.send(watermarkedBuffer);
     }
@@ -186,11 +205,14 @@ if (token) {
 
     // Get buyer info for watermark
     const { rows: buyerRows } = await db.query(
-      'SELECT email FROM users WHERE id = $1', [record.buyer_id]
+      'SELECT watermark_code FROM users WHERE id = $1', [record.buyer_id]
     );
-    const watermarkText = buyerRows[0]?.email || code;
+    if (!buyerRows[0]?.watermark_code) {
+      return res.status(500).json({ error: 'Watermark identity is unavailable' });
+    }
 
-    const watermarkedBuffer = await addWatermark(imagePath, watermarkText);
+    const watermarkLabel = createWatermarkLabel(buyerRows[0].watermark_code, Number(id), pageNumber);
+    const watermarkedBuffer = await addWatermark(imagePath, watermarkLabel);
 
     res.set({
       'Content-Type': 'image/jpeg',

@@ -350,6 +350,12 @@ a:hover { text-decoration: underline; }
 .doc-preview-pane { border-radius: var(--radius); overflow: hidden; border: 1px solid var(--border); }
 .doc-preview-pane img { width: 100%; display: block; }
 .doc-preview-note { padding: 10px 14px; background: var(--raised); font-size: 12px; color: var(--muted); text-align: center; }
+.doc-preview-placeholder {
+  min-height: 220px; padding: 24px; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 10px; text-align: center;
+  background: var(--raised); color: var(--muted); font-size: 14px;
+}
+.doc-preview-placeholder i { font-size: 24px; }
 
 .doc-info-pane {}
 .doc-info-pane h1 { font-family: 'DM Serif Display', serif; font-size: 24px; font-weight: 400; line-height: 1.25; margin-bottom: 10px; }
@@ -533,6 +539,7 @@ a:hover { text-decoration: underline; }
 .field-input:focus { outline: none; border-color: var(--accent); }
 .field-textarea { resize: vertical; min-height: 90px; }
 .field-error { font-size: 13px; color: var(--danger); margin-top: -6px; margin-bottom: 10px; }
+.field-hint { font-size: 12px; color: var(--muted); margin-top: 5px; line-height: 1.4; }
 
 .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 @media (max-width: 480px) { .form-row { grid-template-columns: 1fr; } }
@@ -560,6 +567,7 @@ a:hover { text-decoration: underline; }
 .upload-icon { font-size: 32px; color: var(--muted); margin-bottom: 10px; }
 .upload-dropzone h3 { font-size: 16px; font-weight: 500; margin-bottom: 4px; }
 .upload-dropzone p { font-size: 13px; color: var(--muted); }
+.upload-dropzone .upload-privacy-note { max-width: 520px; margin: 8px auto 0; font-size: 12px; }
 .upload-filename { font-size: 13px; color: var(--accent); font-weight: 500; display: block; margin-top: 8px; }
 
 /* ─── Seller dashboard ───────────────────────────────────── */
@@ -619,6 +627,49 @@ a:hover { text-decoration: underline; }
 .admin-row-title { font-size: 14px; font-weight: 500; }
 .admin-row-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
 .admin-row-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.privacy-review-control {
+  display: flex; align-items: flex-start; gap: 8px; margin-top: 10px;
+  color: var(--muted); font-size: 12px; line-height: 1.4;
+}
+.privacy-review-control input { margin-top: 2px; flex-shrink: 0; }
+.privacy-scan-result {
+  margin-top: 8px; padding: 8px 10px; border-radius: var(--radius-sm);
+  background: var(--background); color: var(--muted); font-size: 12px; line-height: 1.5;
+}
+.privacy-findings { margin: 6px 0 0; padding-left: 18px; }
+.watermark-verify {
+  margin-bottom: 18px; padding: 16px; border: 1px solid var(--border);
+  border-radius: var(--radius-sm); background: var(--surface);
+}
+.watermark-verify h3 { margin: 0 0 4px; font-size: 15px; }
+.watermark-verify p { margin: 0 0 12px; color: var(--muted); font-size: 12px; }
+.watermark-verify-form {
+  display: grid; grid-template-columns: minmax(220px, 2fr) minmax(100px, 1fr) minmax(80px, 1fr) auto;
+  align-items: end; gap: 10px;
+}
+.watermark-verify-form label { display: grid; gap: 5px; color: var(--muted); font-size: 12px; }
+#watermark-verify-result { margin-top: 10px; font-size: 13px; overflow-wrap: anywhere; }
+.admin-row-actions { flex-wrap: wrap; justify-content: flex-end; }
+
+@media (max-width: 640px) {
+  .nav { gap: 8px; padding: 0 12px; }
+  .nav-center { display: none; }
+  .nav-right { gap: 4px; }
+  #nav-auth-btns { display: flex; align-items: center; gap: 6px; }
+  #nav-auth-btns[hidden] { display: none; }
+  #nav-auth-btns .btn { padding: 7px 11px; font-size: 13px; }
+  .watermark-verify-form { grid-template-columns: 1fr; }
+  .admin-row { align-items: flex-start; flex-direction: column; }
+  .admin-row-actions { max-width: 100%; justify-content: flex-start; }
+  .admin-row { align-items: stretch; flex-direction: column; }
+  .admin-row-actions { flex-wrap: wrap; }
+}
+
+@media (max-width: 380px) {
+  .nav { padding: 0 8px; }
+  .logo { font-size: 19px; }
+  #nav-login-btn { display: none; }
+}
 
 /* ─── Payment modal ──────────────────────────────────────── */
 .modal-overlay {

@@ -1,10 +1,11 @@
 const path = require('path');
 const fs = require('fs');
-const { execSync } = require('child_process');
+const { execFileSync } = require('child_process');
 const db = require('../../config/db');
+const { scanPdfForPrivacy } = require('./privacyScanner');
 
-const THUMBNAIL_DIR = process.env.THUMBNAIL_DIR || './public/thumbnails';
-const UPLOAD_DIR = process.env.UPLOAD_DIR || './public/uploads/documents';
+const THUMBNAIL_DIR = process.env.THUMBNAIL_DIR || path.resolve(__dirname, '../../storage/thumbnails');
+const UPLOAD_DIR = process.env.UPLOAD_DIR || path.resolve(__dirname, '../../storage/documents');
 
 // Ensure dirs exist
 [THUMBNAIL_DIR, UPLOAD_DIR].forEach(d => fs.mkdirSync(d, { recursive: true }));
@@ -19,9 +20,10 @@ async function convertPageToImage(filePath, pageNumber, documentId) {
 
   try {
     // pdftoppm is installed via poppler-utils (apt-get install poppler-utils)
-    execSync(
-      `pdftoppm -jpeg -r 150 -f ${pageNumber} -l ${pageNumber} "${filePath}" "${outputBase}"`,
-      { timeout: 30000 }
+    execFileSync(
+      'pdftoppm',
+      ['-jpeg', '-r', '150', '-f', String(pageNumber), '-l', String(pageNumber), filePath, outputBase],
+      { timeout: 30000, windowsHide: true }
     );
 
     if (fs.existsSync(outputFile)) {
@@ -39,11 +41,18 @@ async function convertPageToImage(filePath, pageNumber, documentId) {
 // Get total page count
 function getPdfPageCount(filePath) {
   try {
-    const result = execSync(`pdfinfo "${filePath}" 2>/dev/null | grep Pages`, { timeout: 10000 }).toString();
-    const match = result.match(/Pages:\s+(\d+)/);
-    return match ? parseInt(match[1]) : 1;
-  } catch {
-    return 1;
+    const result = execFileSync('pdfinfo', [filePath], {
+      encoding: 'utf8',
+      timeout: 10000,
+      windowsHide: true,
+    });
+    const match = result.match(/^Pages:\s+(\d+)/m);
+    if (!match) throw new Error('Page count missing from pdfinfo output');
+    const pageCount = parseInt(match[1], 10);
+    if (pageCount < 1) throw new Error('Invalid PDF page count');
+    return pageCount;
+  } catch (err) {
+    throw new Error(`Unable to determine PDF page count: ${err.message}`);
   }
 }
 
@@ -57,10 +66,35 @@ async function processDocument(documentId, filePath) {
     // Generate preview (page 1 only)
     await convertPageToImage(filePath, 1, documentId);
 
-    console.log(`✅ Document ${documentId} processed: ${pageCount} pages`);
-    return { pageCount };
+    const privacyScan = await scanPdfForPrivacy(filePath, pageCount);
+    await db.query(
+      `UPDATE documents
+       SET privacy_scan_status = $1,
+           privacy_scan_findings = $2::jsonb,
+           privacy_scan_at = NOW(),
+           privacy_reviewed = ($1::varchar = 'clear')
+       WHERE id = $3`,
+      [privacyScan.status, JSON.stringify(privacyScan.findings), documentId]
+    );
+
+    console.log(`✅ Document ${documentId} processed: ${pageCount} pages; privacy scan ${privacyScan.status}`);
+    return { pageCount, privacyScan };
   } catch (err) {
     console.error(`Document processing failed for ${documentId}:`, err.message);
+    await db.query(
+      `UPDATE documents
+       SET privacy_scan_status = 'scan_failed',
+           privacy_scan_findings = $1::jsonb,
+           privacy_scan_at = NOW(),
+           privacy_reviewed = false
+       WHERE id = $2`,
+      [JSON.stringify([{ type: 'document_processing_failed', page: null }]), documentId]
+    );
+    await db.query(`
+      INSERT INTO notifications (user_id, type, title, message)
+      SELECT id, 'document_review_failed', 'Document needs manual review', $1
+      FROM users WHERE role = 'admin' LIMIT 1
+    `, [`Document #${documentId} could not be fully processed and must be reviewed or rejected.`]);
     throw err;
   }
 }
@@ -94,15 +128,21 @@ async function addWatermark(imagePath, watermarkText) {
     const metadata = await image.metadata();
     const w = metadata.width || 800;
     const h = metadata.height || 1000;
+    const escapedText = String(watermarkText).replace(/[&<>"']/g, character => ({
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&apos;',
+    })[character]);
 
-    // Create watermark SVG overlay
     const svg = `
       <svg width="${w}" height="${h}" xmlns="http://www.w3.org/2000/svg">
-        <style>text { font-family: Arial; font-size: 18px; fill: rgba(0,0,0,0.12); }</style>
+        <style>text { font-family: Arial; font-size: 18px; font-weight: 700; fill: rgba(0,0,0,0.34); stroke: rgba(255,255,255,0.42); stroke-width: 1px; paint-order: stroke; }</style>
         <g transform="rotate(-30, ${w/2}, ${h/2})">
-          ${Array.from({ length: 6 }, (_, row) =>
-            Array.from({ length: 3 }, (_, col) =>
-              `<text x="${col * 280 - 100}" y="${row * 180 - 50}" transform="rotate(-15)">${watermarkText}</text>`
+          ${Array.from({ length: Math.ceil(h / 220) + 2 }, (_, row) =>
+            Array.from({ length: Math.ceil(w / 360) + 2 }, (_, col) =>
+              `<text x="${col * 360 - 200}" y="${row * 220 - 50}">${escapedText}</text>`
             ).join('')
           ).join('')}
         </g>
@@ -117,7 +157,7 @@ async function addWatermark(imagePath, watermarkText) {
     return watermarkedBuffer;
   } catch (err) {
     console.error('Watermark error:', err.message);
-    return fs.readFileSync(imagePath);
+    throw err;
   }
 }
 

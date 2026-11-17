@@ -1,5 +1,6 @@
 require('dotenv').config();
 const { Pool } = require('pg');
+const { createWatermarkCode } = require('../src/utils/watermarkCode');
 
 const pool = new Pool({
   host: process.env.DB_HOST,
@@ -43,6 +44,9 @@ CREATE TABLE IF NOT EXISTS users (
   full_name VARCHAR(200) NOT NULL,
   phone VARCHAR(20),
   university_id INT REFERENCES universities(id),
+  department_id INT REFERENCES departments(id),
+  school_id VARCHAR(100),
+  watermark_code VARCHAR(24),
   role VARCHAR(20) DEFAULT 'buyer' CHECK (role IN ('buyer', 'seller', 'admin')),
   seller_status VARCHAR(20) DEFAULT 'none' CHECK (seller_status IN ('none', 'pending', 'approved', 'suspended')),
   seller_bio TEXT,
@@ -55,6 +59,15 @@ CREATE TABLE IF NOT EXISTS users (
   last_login TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS department_id INT REFERENCES departments(id);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS school_id VARCHAR(100);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS watermark_code VARCHAR(24);
+CREATE UNIQUE INDEX IF NOT EXISTS users_watermark_code_unique
+  ON users (watermark_code) WHERE watermark_code IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS users_school_id_per_university_unique
+  ON users (university_id, LOWER(school_id))
+  WHERE school_id IS NOT NULL AND university_id IS NOT NULL;
 
 -- Documents
 CREATE TABLE IF NOT EXISTS documents (
@@ -86,6 +99,15 @@ CREATE TABLE IF NOT EXISTS documents (
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+ALTER TABLE documents
+  ADD COLUMN IF NOT EXISTS privacy_reviewed BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE documents
+  ADD COLUMN IF NOT EXISTS privacy_scan_status VARCHAR(24) NOT NULL DEFAULT 'pending';
+ALTER TABLE documents
+  ADD COLUMN IF NOT EXISTS privacy_scan_findings JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE documents
+  ADD COLUMN IF NOT EXISTS privacy_scan_at TIMESTAMPTZ;
 
 -- Department access passes
 CREATE TABLE IF NOT EXISTS department_passes (
@@ -351,6 +373,25 @@ INSERT INTO department_passes (university_id, department_id, name, duration_hour
 ON CONFLICT DO NOTHING;
 `;
 
+async function ensureWatermarkCodes(client) {
+  const { rows } = await client.query('SELECT id FROM users WHERE watermark_code IS NULL');
+  for (const user of rows) {
+    let assigned = false;
+    for (let attempt = 0; attempt < 5 && !assigned; attempt++) {
+      try {
+        const result = await client.query(
+          'UPDATE users SET watermark_code = $1 WHERE id = $2 AND watermark_code IS NULL',
+          [createWatermarkCode(), user.id]
+        );
+        assigned = result.rowCount > 0;
+      } catch (err) {
+        if (err.code !== '23505') throw err;
+      }
+    }
+    if (!assigned) throw new Error(`Could not assign watermark code to user ${user.id}`);
+  }
+}
+
 async function setup() {
   const client = await pool.connect();
   try {
@@ -360,15 +401,34 @@ async function setup() {
     await client.query(seedData);
     console.log('✅ Seed data inserted');
 
-    // Create admin user
-    const bcrypt = require('bcryptjs');
-    const hash = await bcrypt.hash(process.env.ADMIN_PASSWORD || 'admin123', 12);
-    await client.query(`
-      INSERT INTO users (email, password_hash, full_name, role, seller_status, is_verified)
-      VALUES ($1, $2, 'ScholarNest Admin', 'admin', 'approved', true)
-      ON CONFLICT (email) DO NOTHING
-    `, [process.env.ADMIN_EMAIL || 'admin@scholarnest.co.ke', hash]);
-    console.log('✅ Admin user created');
+    const adminEmail = process.env.ADMIN_EMAIL || 'admin@scholarnest.co.ke';
+    const { rows: adminRows } = await client.query(
+      'SELECT id, role FROM users WHERE email = $1',
+      [adminEmail]
+    );
+    if (adminRows[0]) {
+      if (adminRows[0].role !== 'admin') {
+        throw new Error('ADMIN_EMAIL already belongs to a non-admin account');
+      }
+      console.log('✅ Existing admin account retained');
+    } else {
+      const adminPassword = process.env.ADMIN_PASSWORD;
+      if (!adminPassword ||
+          adminPassword.length < 16 ||
+          adminPassword.trim() !== adminPassword ||
+          new Set(adminPassword).size < 8) {
+        throw new Error('Set ADMIN_PASSWORD to a strong password of at least 16 characters with at least 8 distinct characters before creating the admin account');
+      }
+
+      const bcrypt = require('bcryptjs');
+      const hash = await bcrypt.hash(adminPassword, 12);
+      await client.query(`
+        INSERT INTO users (email, password_hash, full_name, role, seller_status, is_verified)
+        VALUES ($1, $2, 'ScholarNest Admin', 'admin', 'approved', true)
+      `, [adminEmail, hash]);
+      console.log('✅ Admin user created');
+    }
+    await ensureWatermarkCodes(client);
     console.log('\n🚀 Database setup complete!');
     console.log('Run: npm run dev');
   } catch (err) {

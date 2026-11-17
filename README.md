@@ -11,6 +11,7 @@ University notes marketplace with device-locked access codes, engagement-based r
 - **Payments**: M-Pesa Daraja API (STK Push)
 - **Document viewer**: Server-side PDF → image rendering (pdftoppm)
 - **Auth**: JWT + httpOnly cookies
+- **Watermarks**: Per-account tracking codes mapped privately to user profiles
 
 ---
 
@@ -51,8 +52,9 @@ cp .env.example .env
 Key values to fill in:
 - `DB_PASSWORD` — your PostgreSQL password
 - `JWT_SECRET` — any long random string
+- `WATERMARK_SECRET` — a separate long random secret for watermark signatures; keep it stable. If omitted, `JWT_SECRET` is used.
 - `MPESA_CONSUMER_KEY` + `MPESA_CONSUMER_SECRET` — from Daraja sandbox
-- `ADMIN_EMAIL` + `ADMIN_PASSWORD` — your admin login
+- `ADMIN_EMAIL` + `ADMIN_PASSWORD` — your admin login; `ADMIN_PASSWORD` must be at least 16 characters with at least 8 distinct characters when creating the first admin. Setup will not use a default password and never resets an existing admin password.
 
 ### 4. Create the database
 
@@ -68,6 +70,7 @@ psql -U postgres -c "CREATE DATABASE scholarnest;"
 
 ```bash
 npm run setup-db
+node scripts/scanExistingDocuments.js # one-time privacy scan for existing PDFs
 ```
 
 This creates all tables, inserts seed data (universities, departments, passes), and creates the admin user.
@@ -118,15 +121,19 @@ MPESA_CALLBACK_URL=https://abc123.ngrok.io/api/payments/mpesa/callback
 | POST | `/api/auth/logout` | Logout |
 | GET | `/api/auth/me` | Current user |
 
+Registration requires a School ID, university, and department. School IDs are not printed on documents; page views show an opaque account watermark code with a page-specific signature. Administrators can resolve the account in the user list and verify the signature in **All documents**.
+
 ### Documents
 | Method | Route | Auth | Description |
 |--------|-------|------|-------------|
 | GET | `/api/documents` | Optional | Browse marketplace |
 | GET | `/api/documents/:id` | Optional | Document detail |
-| GET | `/api/documents/:id/preview` | None | First page preview (no watermark) |
+| GET | `/api/documents/:id/preview` | Authenticated | Watermarked first-page preview after admin privacy review |
 | GET | `/api/documents/:id/page/:n?code=XXX` | Code | View page (watermarked) |
 | POST | `/api/documents` | Seller | Upload document |
 | POST | `/api/documents/:id/engage` | Buyer | Record engagement event |
+
+Document uploads currently support PDF only. Every PDF page is checked with Poppler text extraction for common contact details and labeled personal identifiers. Findings, unreadable/image-only pages, or extraction failures require human privacy review; a clear scan only means no supported indicators were detected. Administrators see finding types and page links in the review queue, and still approve each document before publication. Image-only pages are not OCR-scanned and are always escalated for human review.
 
 ### Payments
 | Method | Route | Auth | Description |
@@ -155,6 +162,7 @@ MPESA_CALLBACK_URL=https://abc123.ngrok.io/api/payments/mpesa/callback
 | GET | `/api/admin/documents/pending` | Admin | Documents awaiting review |
 | POST | `/api/admin/documents/:id/approve` | Admin | Approve document |
 | POST | `/api/admin/documents/:id/reject` | Admin | Reject document |
+| POST | `/api/admin/watermarks/verify` | Admin | Verify a page-specific watermark signature |
 | GET | `/api/admin/payouts/pending` | Admin | Pending payouts |
 | POST | `/api/admin/payouts/process/:id` | Admin | Process payout |
 
@@ -182,7 +190,9 @@ MPESA_CALLBACK_URL=https://abc123.ngrok.io/api/payments/mpesa/callback
 ## Security
 
 - Documents served as **images only** — original PDF never reaches browser
-- Every page has **personalized watermark** (buyer email embedded)
+- Uploads and rendered pages are stored outside the static web root
+- Automated privacy checks scan extractable text on every PDF page; uncertain, flagged, or image-only pages require human review
+- Every viewed page has an opaque account code plus a page-specific HMAC signature; administrators can verify the signature before mapping it to an account. Verification proves the marker was issued for that account/document/page, not who captured or copied an image.
 - Access codes **device-fingerprinted on first use** — bound permanently
 - Right-click, copy, print, download all **disabled client-side**
 - Rate limiting on all endpoints
@@ -240,6 +250,7 @@ scholarnest/
 │   ├── services/
 │   │   ├── mpesa.js            # Daraja API integration
 │   │   ├── documentProcessor.js # PDF → image conversion + watermarks
+│   │   ├── privacyScanner.js    # Full-document text checks and human-review findings
 │   │   ├── plagiarism.js       # Duplicate/similarity detection
 │   │   └── cron.js             # Scheduled jobs
 │   └── utils/
@@ -247,10 +258,13 @@ scholarnest/
 ├── config/
 │   └── db.js                   # PostgreSQL pool
 ├── public/
-│   ├── uploads/documents/      # Uploaded PDFs (not publicly served)
-│   └── thumbnails/             # Generated page images
+│   └── static/                 # Public frontend assets
+├── storage/
+│   ├── documents/              # Uploaded PDFs (not publicly served)
+│   └── thumbnails/             # Generated page images (served only by protected routes)
 ├── scripts/
-│   └── setupDb.js              # DB schema + seed
+│   ├── setupDb.js              # DB schema + seed
+│   └── scanExistingDocuments.js # One-time privacy scan for stored PDFs
 ├── .env.example
 ├── package.json
 └── README.md

@@ -79,6 +79,9 @@ function bindStaticListeners() {
   // Register
   document.getElementById('reg-btn').addEventListener('click', doRegister);
   document.getElementById('go-login-link').addEventListener('click', e => { e.preventDefault(); navigate('login'); });
+  document.getElementById('reg-university').addEventListener('change', function() {
+    loadRegistrationDepartments(this.value);
+  });
   document.getElementById('role-toggle').addEventListener('click', e => {
     const btn = e.target.closest('.role-btn');
     if (btn) selectRole(btn.dataset.role, btn);
@@ -220,20 +223,24 @@ async function doRegister() {
   const name = document.getElementById('reg-name').value.trim();
   const phone = document.getElementById('reg-phone').value.trim();
   const email = document.getElementById('reg-email').value.trim();
+  const school_id = document.getElementById('reg-school-id').value.trim();
   const university_id = document.getElementById('reg-university').value;
+  const department_id = document.getElementById('reg-department').value;
   const password = document.getElementById('reg-password').value;
   const errEl = document.getElementById('reg-error');
   const btn = document.getElementById('reg-btn');
 
   errEl.hidden = true;
-  if (!name || !email || !password || !university_id) {
+  if (!name || !email || !password || !school_id || !university_id || !department_id) {
     errEl.textContent = 'Please fill in all required fields'; errEl.hidden = false; return;
   }
 
   btn.disabled = true; btn.textContent = 'Creating account…';
 
   try {
-    const { user } = await API.auth.register({ full_name: name, phone, email, university_id, password, role: selectedRole });
+    const { user } = await API.auth.register({
+      full_name: name, phone, email, school_id, university_id, department_id, password, role: selectedRole,
+    });
     setUser(user);
     showToast(selectedRole === 'seller' ? "Application submitted! We'll review it soon." : 'Account created!');
     navigate('marketplace');
@@ -442,12 +449,18 @@ async function loadDocumentDetail(docId) {
   try {
     const doc = await API.docs.get(docId);
     State.currentDoc = doc;
+    const lecturerName = typeof doc.lecturer_name === 'string'
+      && /^[\p{L}\p{M}][\p{L}\p{M} .'-]{0,99}$/u.test(doc.lecturer_name.trim())
+      ? doc.lecturer_name.trim()
+      : '';
 
     container.innerHTML = `
       <div class="doc-detail-grid">
         <div class="doc-preview-pane">
-          <img src="${API.docs.preview(docId)}" alt="Preview" onerror="this.style.display='none'" />
-          <div class="doc-preview-note"><i data-lucide="eye"></i> First page preview only</div>
+          ${doc.privacy_reviewed && State.user
+            ? `<img src="${API.docs.preview(docId)}" alt="Document first-page preview" onerror="this.style.display='none'" />
+               <div class="doc-preview-note"><i data-lucide="eye"></i> First page preview only</div>`
+            : `<div class="doc-preview-placeholder"><i data-lucide="eye-off"></i><span>${doc.privacy_reviewed ? 'Log in to see a watermarked preview.' : 'Preview unavailable until a privacy review is complete.'}</span></div>`}
         </div>
         <div class="doc-info-pane">
           <div class="doc-badges">
@@ -455,7 +468,7 @@ async function loadDocumentDetail(docId) {
             <span class="badge">${escHtml(doc.department_name)}</span>
             <span class="badge">${doc.doc_type.replace('_', ' ')}</span>
             ${doc.course_code ? `<span class="badge">${escHtml(doc.course_code)}</span>` : ''}
-            ${doc.lecturer_name ? `<span class="badge">Lec: ${escHtml(doc.lecturer_name)}</span>` : ''}
+            ${lecturerName ? `<span class="badge">Lec: ${escHtml(lecturerName)}</span>` : ''}
             ${doc.is_premium ? '<span class="badge badge-accent">★ Premium</span>' : ''}
           </div>
           <h1>${escHtml(doc.title)}</h1>
@@ -947,10 +960,43 @@ async function loadUploadDepartments(universityId) {
   }
 }
 
+async function loadRegistrationDepartments(universityId) {
+  const deptSel = document.getElementById('reg-department');
+  deptSel.disabled = true;
+  deptSel.innerHTML = '<option value="">Loading…</option>';
+  if (!universityId) {
+    deptSel.innerHTML = '<option value="">Select university first…</option>';
+    return;
+  }
+  try {
+    const departments = await API.departments(universityId);
+    if (document.getElementById('reg-university').value !== String(universityId)) return;
+    deptSel.innerHTML = '<option value="">Select your department…</option>';
+    departments.forEach(department => {
+      deptSel.innerHTML += `<option value="${department.id}">${escHtml(department.name)}</option>`;
+    });
+    deptSel.disabled = false;
+  } catch (err) {
+    deptSel.innerHTML = '<option value="">Failed to load departments</option>';
+    showToast(err.message);
+  }
+}
+
 let _uploadFile = null;
 function handleFileSelect(input) {
   const file = input.files[0];
   if (!file) return;
+  const errEl = document.getElementById('upload-error');
+  errEl.hidden = true;
+  if (!file.name.toLowerCase().endsWith('.pdf')) {
+    input.value = '';
+    _uploadFile = null;
+    document.getElementById('upload-dropzone').classList.remove('has-file');
+    document.getElementById('upload-filename').textContent = '';
+    errEl.textContent = 'Only PDF files are supported';
+    errEl.hidden = false;
+    return;
+  }
   _uploadFile = file;
   document.getElementById('upload-dropzone').classList.add('has-file');
   document.getElementById('upload-filename').textContent = `📎 ${file.name} (${(file.size / 1024 / 1024).toFixed(1)} MB)`;
@@ -1054,20 +1100,74 @@ async function loadAdminDocs() {
   const list = document.getElementById('admin-docs-list');
   const docs = await API.admin.pendingDocs().catch(() => []);
   if (!docs.length) { list.innerHTML = '<div class="empty-state-sm">No documents pending review</div>'; return; }
-  list.innerHTML = docs.map(d => `
+  const findingLabels = {
+    email_address: 'Possible email address',
+    phone_number: 'Possible phone number',
+    labeled_identifier: 'Labeled personal or student identifier',
+    labeled_personal_name: 'Labeled personal name',
+    possible_payment_card: 'Possible payment card number',
+    page_not_text_searchable: 'Page has no searchable text; image content needs human review',
+    text_extraction_failed: 'Text extraction failed',
+    page_count_unavailable: 'Page count unavailable',
+    document_processing_failed: 'Document processing failed',
+    document_too_many_pages: 'Document exceeds the automated scan page limit',
+  };
+  list.innerHTML = docs.map(d => {
+    const scanStatus = d.privacy_scan_status || 'pending';
+    const findings = Array.isArray(d.privacy_scan_findings) ? d.privacy_scan_findings : [];
+    const findingsMarkup = findings.length
+      ? `<ul class="privacy-findings">${findings.map(f => `
+          <li>${escHtml(findingLabels[f.type] || 'Unclassified scan result')}${Number.isInteger(f.page) ? ` — page ${f.page}` : ''}</li>
+        `).join('')}</ul>`
+      : '';
+    const reviewPages = [...new Set(findings
+      .map(f => f.page)
+      .filter(page => Number.isInteger(page) && page > 0 && page <= d.total_pages))];
+    const statusText = scanStatus === 'clear'
+      ? 'Automated scan found no supported text-based indicators. This is not a guarantee; content approval is still required.'
+      : scanStatus === 'review_required'
+        ? 'Possible sensitive content found. Human privacy review is required.'
+        : scanStatus === 'scan_failed'
+          ? 'Automated scan could not complete. Human privacy review is required.'
+          : 'Privacy scan is pending or was not run. Human privacy review is required.';
+    const humanReviewRequired = scanStatus !== 'clear';
+    return `
     <div class="admin-row">
       <div class="admin-row-info">
         <div class="admin-row-title">${escHtml(d.title)}</div>
         <div class="admin-row-sub">${escHtml(d.seller_name)} · ${d.short_name} ${escHtml(d.department)} · ${d.total_pages} pages · Plagiarism: ${d.plagiarism_score}%</div>
+        <div class="privacy-scan-result">
+          <strong>Privacy scan: ${escHtml(scanStatus.replace(/_/g, ' '))}</strong>
+          <div>${escHtml(statusText)}</div>
+          ${findingsMarkup}
+        </div>
+        ${d.total_pages > 0
+          ? humanReviewRequired ? `<label class="privacy-review-control">
+               <input type="checkbox" class="privacy-review-check" data-id="${d.id}" />
+               <span>I reviewed the flagged pages and the full document, and confirm it is safe to approve</span>
+             </label>` : ''
+          : '<div class="admin-row-sub">Preview is not ready yet; approval is unavailable.</div>'}
       </div>
       <div class="admin-row-actions">
-        <button class="btn btn-sm btn-primary approve-doc-btn" data-id="${d.id}">Approve</button>
+        ${d.total_pages > 0 ? `<a class="btn btn-sm btn-ghost" href="/api/documents/${d.id}/page/1" target="_blank" rel="noopener">Review page 1</a>` : ''}
+        ${reviewPages.map(page => `<a class="btn btn-sm btn-ghost" href="/api/documents/${d.id}/page/${page}" target="_blank" rel="noopener">Review page ${page}</a>`).join('')}
+        <button class="btn btn-sm btn-primary approve-doc-btn" data-id="${d.id}" ${d.total_pages <= 0 || humanReviewRequired ? 'disabled' : ''}>Approve</button>
         <button class="btn btn-sm btn-danger reject-doc-btn" data-id="${d.id}">Reject</button>
       </div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 
+  list.querySelectorAll('.privacy-review-check').forEach(check => {
+    check.addEventListener('change', () => {
+      const approveButton = list.querySelector(`.approve-doc-btn[data-id="${check.dataset.id}"]`);
+      approveButton.disabled = !check.checked;
+    });
+  });
   list.querySelectorAll('.approve-doc-btn').forEach(btn => {
-    btn.addEventListener('click', () => adminApproveDoc(btn.dataset.id));
+    btn.addEventListener('click', () => {
+      const check = list.querySelector(`.privacy-review-check[data-id="${btn.dataset.id}"]`);
+      adminApproveDoc(btn.dataset.id, Boolean(check?.checked));
+    });
   });
   list.querySelectorAll('.reject-doc-btn').forEach(btn => {
     btn.addEventListener('click', () => adminRejectDoc(btn.dataset.id));
@@ -1116,9 +1216,14 @@ async function adminRejectSeller(id) {
   await API.admin.rejectSeller(id, reason).catch(err => showToast(err.message));
   showToast('Seller rejected'); loadAdminSellers();
 }
-async function adminApproveDoc(id) {
-  await API.admin.approveDoc(id).catch(err => showToast(err.message));
-  showToast('Document approved and live!'); loadAdminDocs();
+async function adminApproveDoc(id, privacyReviewed) {
+  try {
+    await API.admin.approveDoc(id, privacyReviewed);
+    showToast('Document approved and live!');
+    loadAdminDocs();
+  } catch (err) {
+    showToast(err.message);
+  }
 }
 async function adminRejectDoc(id) {
   const reason = prompt('Reason for rejection (sent to seller):');
@@ -1289,7 +1394,9 @@ function renderUsersList() {
   const filtered = _userSearch
     ? _allUsersData.filter(u =>
         u.full_name.toLowerCase().includes(_userSearch) ||
-        u.email.toLowerCase().includes(_userSearch)
+    u.email.toLowerCase().includes(_userSearch) ||
+    (u.school_id || '').toLowerCase().includes(_userSearch) ||
+    (u.watermark_code || '').toLowerCase().includes(_userSearch)
       )
     : _allUsersData;
 
@@ -1302,7 +1409,10 @@ function renderUsersList() {
           <span class="doc-status-badge ${u.is_active ? 'status-approved' : 'status-rejected'}">${u.is_active ? 'active' : 'deactivated'}</span>
           <span class="doc-status-badge status-pending">${u.role}</span>
         </div>
-        <div class="admin-row-sub">${escHtml(u.email)} · ${escHtml(u.university_name || '—')} · Joined ${relativeTime(u.created_at)}</div>
+        <div class="admin-row-sub">
+          ${escHtml(u.email)} · ${escHtml(u.university_name || '—')} · ${escHtml(u.department_name || '—')} ·
+          School ID: ${escHtml(u.school_id || '—')} · Watermark: ${escHtml(u.watermark_code || '—')} · Joined ${relativeTime(u.created_at)}
+        </div>
       </div>
       <div class="admin-row-actions">
         ${u.is_active
@@ -1351,10 +1461,52 @@ let _docSearch = '';
 async function loadAdminAllDocuments() {
   const list = document.getElementById('admin-all-docs-list');
   list.innerHTML = `
+    <div class="watermark-verify">
+      <h3>Verify a document watermark</h3>
+      <p>Verify the marker with its document ID and page. Authenticity alone does not prove who captured or copied an image.</p>
+      <form id="watermark-verify-form" class="watermark-verify-form">
+        <label>Watermark marker
+          <input type="text" id="watermark-marker-input" class="field-input" placeholder="SN-… | V-…" required />
+        </label>
+        <label>Document ID
+          <input type="number" id="watermark-document-input" class="field-input" min="1" required />
+        </label>
+        <label>Page
+          <input type="number" id="watermark-page-input" class="field-input" min="1" required />
+        </label>
+        <button class="btn btn-primary" type="submit">Verify</button>
+      </form>
+      <div id="watermark-verify-result" role="status" aria-live="polite"></div>
+    </div>
     <div style="margin-bottom:12px">
       <input type="text" id="doc-search-input" class="field-input" placeholder="Search by title, seller, lecturer…" style="max-width:400px" />
     </div>
     <div id="docs-list-inner"><div class="empty-state-sm">Loading…</div></div>`;
+
+  document.getElementById('watermark-verify-form').addEventListener('submit', async function(event) {
+    event.preventDefault();
+    const result = document.getElementById('watermark-verify-result');
+    const marker = document.getElementById('watermark-marker-input').value.trim();
+    const match = marker.match(/^(SN-[A-F0-9]{20})\s*\|\s*V-([A-F0-9]{24})$/i);
+    if (!match) {
+      result.textContent = 'Enter the full marker in the format SN-… | V-….';
+      return;
+    }
+
+    try {
+      const verification = await API.admin.verifyWatermark({
+        watermark_code: match[1],
+        signature: match[2],
+        document_id: Number(document.getElementById('watermark-document-input').value),
+        page: Number(document.getElementById('watermark-page-input').value),
+      });
+      result.innerHTML = verification.authentic
+        ? `<strong>Authentic marker.</strong> Issued to: ${escHtml(verification.user.full_name)} · ${escHtml(verification.user.email)} · School ID: ${escHtml(verification.user.school_id || '—')}. The signature is not proof of who captured or copied the image; review other evidence before taking action.`
+        : '<strong>Invalid marker.</strong> Do not attribute this copy to an account based on this watermark.';
+    } catch (err) {
+      result.textContent = err.message;
+    }
+  });
 
   document.getElementById('doc-search-input').addEventListener('input', function() {
     _docSearch = this.value.toLowerCase();
@@ -1394,6 +1546,10 @@ function renderDocsList() {
       <div class="admin-row-actions">
         ${d.is_active
           ? `<button class="btn btn-sm btn-primary admin-view-doc-btn" data-id="${d.id}">View</button>
+             ${d.total_pages > 0 ? `<a class="btn btn-sm btn-ghost" href="/api/documents/${d.id}/page/1" target="_blank" rel="noopener">Review preview</a>` : ''}
+             ${d.status === 'approved' && !d.privacy_reviewed
+               ? `<button class="btn btn-sm btn-ghost review-doc-preview-btn" data-id="${d.id}">Enable preview</button>`
+               : d.privacy_reviewed ? '<span class="doc-status-badge status-approved">preview reviewed</span>' : ''}
              <button class="btn btn-sm btn-danger delete-doc-btn" data-id="${d.id}">Remove</button>`
           : `<button class="btn btn-sm btn-ghost restore-doc-btn" data-id="${d.id}" data-seller="${escHtml(d.seller_name)}">Restore</button>`
         }
@@ -1405,6 +1561,10 @@ function renderDocsList() {
       State.viewer.code = 'ADMIN';
       navigate('viewer', btn.dataset.id);
     });
+  });
+
+  list.querySelectorAll('.review-doc-preview-btn').forEach(btn => {
+    btn.addEventListener('click', () => adminReviewDocumentPreview(btn.dataset.id));
   });
 
   list.querySelectorAll('.delete-doc-btn').forEach(btn => {
@@ -1426,4 +1586,16 @@ function renderDocsList() {
       renderDocsList();
     });
   });
+}
+
+async function adminReviewDocumentPreview(id) {
+  if (!confirm('Confirm that you reviewed the first page and it is safe to show as a public preview without personal or confidential information?')) return;
+  try {
+    await API.admin.reviewPreview(id);
+    showToast('Public preview enabled');
+    _allDocsData = await API.admin.allDocuments();
+    renderDocsList();
+  } catch (err) {
+    showToast(err.message);
+  }
 }

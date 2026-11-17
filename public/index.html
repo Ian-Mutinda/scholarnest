@@ -235,9 +235,20 @@
             <input type="email" id="reg-email" class="field-input" placeholder="you@university.ac.ke" />
           </div>
           <div class="field-group">
+            <label class="field-label">School ID</label>
+            <input type="text" id="reg-school-id" class="field-input" placeholder="Your student registration number" autocomplete="off" />
+            <p class="field-hint">Kept private; a random tracking code, not your School ID, appears on viewed pages.</p>
+          </div>
+          <div class="field-group">
             <label class="field-label">University</label>
             <select id="reg-university" class="field-input">
               <option value="">Select your university…</option>
+            </select>
+          </div>
+          <div class="field-group">
+            <label class="field-label">Department</label>
+            <select id="reg-department" class="field-input" disabled>
+              <option value="">Select university first…</option>
             </select>
           </div>
           <div class="field-group">
@@ -272,10 +283,11 @@
             <div class="upload-dropzone" id="upload-dropzone">
               <div class="upload-icon"><i data-lucide="cloud-upload"></i></div>
               <h3>Drop your file here</h3>
-              <p>PDF, DOCX, or PPTX · Max 50MB</p>
+              <p>PDF only · Max 50MB</p>
+              <p class="upload-privacy-note">The first page may be shown publicly after review. Remove personal or confidential information before uploading.</p>
               <span id="upload-filename" class="upload-filename"></span>
             </div>
-            <input type="file" id="file-input" accept=".pdf,.docx,.pptx" hidden />
+            <input type="file" id="file-input" accept=".pdf,application/pdf" hidden />
             <div class="upload-form">
               <div class="form-row">
                 <div class="field-group">
