@@ -55,6 +55,10 @@ Key values to fill in:
 - `WATERMARK_SECRET` — a separate long random secret for watermark signatures; keep it stable. If omitted, `JWT_SECRET` is used.
 - `MPESA_CONSUMER_KEY` + `MPESA_CONSUMER_SECRET` — from Daraja sandbox
 - `ADMIN_EMAIL` + `ADMIN_PASSWORD` — your admin login; `ADMIN_PASSWORD` must be at least 16 characters with at least 8 distinct characters when creating the first admin. Setup will not use a default password and never resets an existing admin password.
+- `SMTP_HOST`, `SMTP_PORT`, `EMAIL_FROM`, `SMTP_USER`, and `SMTP_PASSWORD` — your outgoing mail service. For unauthenticated relays, leave both SMTP credentials empty.
+- `APP_BASE_URL` — the public app URL used to build confirmation links. Use HTTPS in production; for local development, set it to the server's actual port.
+
+Never commit `.env` or paste mail credentials into chat or source control. Registration requires SMTP and `APP_BASE_URL` to be configured.
 
 ### 4. Create the database
 
@@ -117,11 +121,15 @@ MPESA_CALLBACK_URL=https://abc123.ngrok.io/api/payments/mpesa/callback
 | Method | Route | Description |
 |--------|-------|-------------|
 | POST | `/api/auth/register` | Register buyer or seller |
+| POST | `/api/auth/verify-email` | Confirm a single-use verification token |
+| POST | `/api/auth/resend-verification` | Resend an email confirmation link |
 | POST | `/api/auth/login` | Login |
 | POST | `/api/auth/logout` | Logout |
 | GET | `/api/auth/me` | Current user |
 
-Registration requires a School ID, university, and department. School IDs are not printed on documents; page views show an opaque account watermark code with a page-specific signature. Administrators can resolve the account in the user list and verify the signature in **All documents**.
+Registration requires a School ID, university-provided email, and department. Users create their password after opening the confirmation link, so someone cannot activate an account using a password chosen for another person's email. School IDs are not printed on documents; page views show an opaque account watermark code with a page-specific signature. Administrators can resolve the account in the user list and verify the signature in **All documents**.
+
+New accounts must use an exact student-email domain configured for their selected university and confirm ownership through a single-use link that expires after 24 hours. This verifies control of the mailbox, not enrollment or the School ID itself. Unconfirmed accounts cannot log in; existing accounts remain verified during the schema migration. The signup form initially shows the six universities with the most verified members and reveals the rest on request. Currently, 17 listed schools have a student-email suffix backed by an official source; the rest remain visible but disabled until their ICT/registrar office confirms the suffix. New universities without departmental data receive a general "Other / not listed" department until their departments are configured.
 
 ### Documents
 | Method | Route | Auth | Description |

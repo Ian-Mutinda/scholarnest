@@ -2,6 +2,9 @@
 const State = {
   user: null,
   universities: [],
+  registrationUniversities: [],
+  registrationUniversitiesExpanded: false,
+  emailVerificationToken: null,
   currentDoc: null,
   viewer: { code: null, docId: null, page: 1, totalPages: 1, zoom: 100 },
   marketplace: { uniId: 'all', deptId: 'all', docType: 'all', search: '', page: 1, docs: [] },
@@ -14,11 +17,16 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupDeviceInfo();
   await loadUniversities();
   await tryRestoreSession();
-  window.location.hash = '';
-  navigate('marketplace', null, false);
-  window.addEventListener('hashchange', handleHashNav);
   setupSearchDebounce();
   bindStaticListeners();
+  const [initialPage, initialParam] = window.location.hash.slice(1).split('/');
+  if (initialPage === 'verify-email' && initialParam) {
+    navigate(initialPage, initialParam, false);
+  } else {
+    window.location.hash = '';
+    navigate('marketplace', null, false);
+  }
+  window.addEventListener('hashchange', handleHashNav);
 });
 
 // ─── Bind all static event listeners ─────────────────────────────────────────
@@ -74,11 +82,31 @@ function bindStaticListeners() {
   // Login
   document.getElementById('login-btn').addEventListener('click', doLogin);
   document.getElementById('login-password').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+  document.getElementById('resend-login-verification-btn').addEventListener('click', () =>
+    resendVerificationEmail(
+      document.getElementById('login-email').value.trim(),
+      document.getElementById('login-resend-result'),
+      document.getElementById('resend-login-verification-btn')
+    )
+  );
   document.getElementById('go-register-link').addEventListener('click', e => { e.preventDefault(); navigate('register'); });
 
   // Register
   document.getElementById('reg-btn').addEventListener('click', doRegister);
+  document.getElementById('reg-university-more-btn').addEventListener('click', () => {
+    State.registrationUniversitiesExpanded = true;
+    renderRegistrationUniversities();
+  });
+  document.getElementById('resend-register-verification-btn').addEventListener('click', () =>
+    resendVerificationEmail(
+      document.getElementById('reg-email').value.trim(),
+      document.getElementById('reg-success'),
+      document.getElementById('resend-register-verification-btn')
+    )
+  );
   document.getElementById('go-login-link').addEventListener('click', e => { e.preventDefault(); navigate('login'); });
+  document.getElementById('verify-email-btn').addEventListener('click', confirmEmailVerification);
+  document.getElementById('verify-email-login-btn').addEventListener('click', () => navigate('login'));
   document.getElementById('reg-university').addEventListener('change', function() {
     loadRegistrationDepartments(this.value);
   });
@@ -143,6 +171,7 @@ function navigate(page, param = null, pushState = true) {
   if (!pageEl) { navigate('marketplace'); return; }
   pageEl.classList.add('active');
 
+  if (page === 'verify-email') State.emailVerificationToken = param;
   if (pushState) window.history.pushState(null, '', `#${page}${param ? '/' + param : ''}`);
 
   if (page === 'marketplace') loadMarketplace();
@@ -226,28 +255,88 @@ async function doRegister() {
   const school_id = document.getElementById('reg-school-id').value.trim();
   const university_id = document.getElementById('reg-university').value;
   const department_id = document.getElementById('reg-department').value;
-  const password = document.getElementById('reg-password').value;
   const errEl = document.getElementById('reg-error');
+  const successEl = document.getElementById('reg-success');
+  const resendBtn = document.getElementById('resend-register-verification-btn');
   const btn = document.getElementById('reg-btn');
 
   errEl.hidden = true;
-  if (!name || !email || !password || !school_id || !university_id || !department_id) {
+  successEl.hidden = true;
+  resendBtn.hidden = true;
+  if (!name || !email || !school_id || !university_id || !department_id) {
     errEl.textContent = 'Please fill in all required fields'; errEl.hidden = false; return;
   }
 
   btn.disabled = true; btn.textContent = 'Creating account…';
 
   try {
-    const { user } = await API.auth.register({
-      full_name: name, phone, email, school_id, university_id, department_id, password, role: selectedRole,
+    const result = await API.auth.register({
+      full_name: name, phone, email, school_id, university_id, department_id, role: selectedRole,
     });
-    setUser(user);
-    showToast(selectedRole === 'seller' ? "Application submitted! We'll review it soon." : 'Account created!');
-    navigate('marketplace');
+    successEl.textContent = result.message;
+    successEl.hidden = false;
+    resendBtn.hidden = false;
   } catch (err) {
-    errEl.textContent = err.message; errEl.hidden = false;
+    errEl.textContent = err.message;
+    errEl.hidden = false;
+    if (err.message.startsWith('Account created,') || err.message.includes('already registered')) {
+      resendBtn.hidden = false;
+    }
   } finally {
     btn.disabled = false; btn.textContent = 'Create account';
+  }
+}
+
+async function resendVerificationEmail(email, messageEl, button) {
+  if (!email) {
+    messageEl.textContent = 'Enter your email address first.';
+    messageEl.hidden = false;
+    return;
+  }
+  button.disabled = true;
+  try {
+    const result = await API.auth.resendVerification({ email });
+    messageEl.textContent = result.message;
+    messageEl.hidden = false;
+  } catch (err) {
+    messageEl.textContent = err.message;
+    messageEl.hidden = false;
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function confirmEmailVerification() {
+  const button = document.getElementById('verify-email-btn');
+  const messageEl = document.getElementById('verify-email-message');
+  const errorEl = document.getElementById('verify-email-error');
+  errorEl.hidden = true;
+  const password = document.getElementById('verify-email-password').value;
+  const passwordConfirm = document.getElementById('verify-email-password-confirm').value;
+  if (password.length < 8 || new TextEncoder().encode(password).length > 72) {
+    errorEl.textContent = 'Password must be at least 8 characters and no more than 72 bytes.';
+    errorEl.hidden = false;
+    return;
+  }
+  if (password !== passwordConfirm) {
+    errorEl.textContent = 'Passwords do not match.';
+    errorEl.hidden = false;
+    return;
+  }
+  button.disabled = true;
+  try {
+    const result = await API.auth.verifyEmail({ token: State.emailVerificationToken, password });
+    messageEl.textContent = result.message;
+    button.hidden = true;
+    document.getElementById('verify-email-password-group').hidden = true;
+    document.getElementById('verify-email-password-confirm-group').hidden = true;
+    State.emailVerificationToken = null;
+    window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#verify-email`);
+  } catch (err) {
+    errorEl.textContent = err.message;
+    errorEl.hidden = false;
+  } finally {
+    button.disabled = false;
   }
 }
 
@@ -262,11 +351,14 @@ async function logout() {
 // ─── Universities ─────────────────────────────────────────────────────────────
 async function loadUniversities() {
   try {
-    State.universities = await API.universities();
-    const sel = document.getElementById('reg-university');
-    State.universities.forEach(u => {
-      sel.innerHTML += `<option value="${u.id}">${u.name} (${u.short_name})</option>`;
-    });
+    const [universities, registrationUniversities] = await Promise.all([
+      API.universities(),
+      API.registrationUniversities(),
+    ]);
+    State.universities = universities;
+    State.registrationUniversities = registrationUniversities;
+    renderRegistrationUniversities();
+
     const filtersEl = document.getElementById('uni-filters');
     State.universities.forEach(u => {
       const btn = document.createElement('button');
@@ -276,7 +368,38 @@ async function loadUniversities() {
       btn.addEventListener('click', function() { filterByUni(u.id, this); });
       filtersEl.appendChild(btn);
     });
-  } catch {}
+  } catch (err) {
+    console.error('Failed to load universities:', err);
+    showToast('Failed to load universities');
+  }
+}
+
+function renderRegistrationUniversities() {
+  const sel = document.getElementById('reg-university');
+  const toggle = document.getElementById('reg-university-more-btn');
+  const selected = sel.value;
+  const availableUniversities = State.registrationUniversities.filter(university => university.domain);
+  const universities = State.registrationUniversitiesExpanded
+    ? State.registrationUniversities
+    : availableUniversities.slice(0, 6);
+
+  sel.replaceChildren(new Option('Select your university…', ''));
+  universities.forEach(university => {
+    const option = new Option(`${university.name} (${university.short_name})`, university.id);
+    if (!university.domain) {
+      option.disabled = true;
+      option.textContent += ' — email domain pending';
+    }
+    sel.add(option);
+  });
+  if (selected && universities.some(university => String(university.id) === selected)) {
+    sel.value = selected;
+  }
+
+  const remaining = Math.max(0, State.registrationUniversities.length - universities.length);
+  toggle.hidden = State.registrationUniversitiesExpanded || remaining === 0;
+  toggle.setAttribute('aria-expanded', String(State.registrationUniversitiesExpanded));
+  toggle.textContent = `Show all universities${remaining ? ` (${remaining} more)` : ''}`;
 }
 
 // ─── Marketplace ──────────────────────────────────────────────────────────────

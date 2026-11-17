@@ -16,7 +16,7 @@ router.get('/stats', async (req, res) => {
       db.query('SELECT COUNT(*) FROM purchases WHERE payment_status = $1', ['completed']),
       db.query('SELECT SUM(platform_cut) as total FROM purchases WHERE payment_status = $1', ['completed']),
       db.query('SELECT COUNT(*) FROM documents WHERE status = $1', ['pending']),
-      db.query('SELECT COUNT(*) FROM users WHERE seller_status = $1', ['pending']),
+      db.query('SELECT COUNT(*) FROM users WHERE seller_status = $1 AND email_verified = true', ['pending']),
     ]);
 
     res.json({
@@ -39,7 +39,7 @@ router.get('/sellers/pending', async (req, res) => {
            un.name as university_name
     FROM users u
     LEFT JOIN universities un ON un.id = u.university_id
-    WHERE u.seller_status = 'pending'
+    WHERE u.seller_status = 'pending' AND u.email_verified = true
     ORDER BY u.created_at ASC
   `);
   res.json(rows);

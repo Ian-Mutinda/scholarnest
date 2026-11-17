@@ -8,12 +8,15 @@ const auth = async (req, res, next) => {
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     const { rows } = await db.query(
-      'SELECT id, email, full_name, role, seller_status, university_id, is_active FROM users WHERE id = $1',
+      'SELECT id, email, full_name, role, seller_status, university_id, is_active, email_verified FROM users WHERE id = $1',
       [decoded.id]
     );
 
     if (!rows[0] || !rows[0].is_active) {
       return res.status(401).json({ error: 'Account not found or deactivated' });
+    }
+    if (!rows[0].email_verified) {
+      return res.status(403).json({ error: 'Email verification required' });
     }
 
     req.user = rows[0];
@@ -47,8 +50,11 @@ const optionalAuth = async (req, res, next) => {
     const token = req.cookies?.token || req.headers.authorization?.replace('Bearer ', '');
     if (!token) return next();
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const { rows } = await db.query('SELECT id, email, full_name, role FROM users WHERE id = $1', [decoded.id]);
-    if (rows[0]) req.user = rows[0];
+    const { rows } = await db.query(
+      'SELECT id, email, full_name, role, is_active, email_verified FROM users WHERE id = $1',
+      [decoded.id]
+    );
+    if (rows[0]?.is_active && rows[0]?.email_verified) req.user = rows[0];
   } catch {}
   next();
 };

@@ -25,10 +25,12 @@ const API = {
 
   // Auth
   auth: {
-    register: (data)  => API.post('/auth/register', data),
-    login:    (data)  => API.post('/auth/login', data),
-    logout:   ()      => API.post('/auth/logout'),
-    me:       ()      => API.get('/auth/me'),
+    register:          (data) => API.post('/auth/register', data),
+    login:             (data) => API.post('/auth/login', data),
+    verifyEmail:       (data) => API.post('/auth/verify-email', data),
+    resendVerification:(data) => API.post('/auth/resend-verification', data),
+    logout:            ()     => API.post('/auth/logout'),
+    me:                ()     => API.get('/auth/me'),
   },
 
   // Documents
@@ -80,9 +82,10 @@ const API = {
   },
 
   // Misc
-  universities: ()    => API.get('/universities'),
-  departments:  (id)  => API.get(`/universities/${id}/departments`),
-  passes:       (id)  => API.get(`/universities/${id}/passes`),
-  notifications: ()   => API.get('/notifications'),
-  markNotifRead: (id) => API.put(`/notifications/${id}/read`),
+  universities:           ()   => API.get('/universities'),
+  registrationUniversities:()  => API.get('/universities/registration'),
+  departments:            (id) => API.get(`/universities/${id}/departments`),
+  passes:                 (id) => API.get(`/universities/${id}/passes`),
+  notifications:          ()   => API.get('/notifications'),
+  markNotifRead:          (id) => API.put(`/notifications/${id}/read`),
 };

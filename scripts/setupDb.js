@@ -1,6 +1,7 @@
 require('dotenv').config();
 const { Pool } = require('pg');
 const { createWatermarkCode } = require('../src/utils/watermarkCode');
+const universityData = require('./universityData');
 
 const pool = new Pool({
   host: process.env.DB_HOST,
@@ -19,10 +20,13 @@ CREATE TABLE IF NOT EXISTS universities (
   slug VARCHAR(100) UNIQUE NOT NULL,
   short_name VARCHAR(20) NOT NULL,
   domain VARCHAR(100),
+  email_domain_source VARCHAR(1000),
   logo_url VARCHAR(500),
   is_active BOOLEAN DEFAULT true,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+ALTER TABLE universities ADD COLUMN IF NOT EXISTS email_domain_source VARCHAR(1000);
 
 -- Departments (per university)
 CREATE TABLE IF NOT EXISTS departments (
@@ -47,6 +51,10 @@ CREATE TABLE IF NOT EXISTS users (
   department_id INT REFERENCES departments(id),
   school_id VARCHAR(100),
   watermark_code VARCHAR(24),
+  email_verified BOOLEAN NOT NULL DEFAULT true,
+  email_verification_token_hash CHAR(64),
+  email_verification_expires_at TIMESTAMPTZ,
+  verification_email_sent_at TIMESTAMPTZ,
   role VARCHAR(20) DEFAULT 'buyer' CHECK (role IN ('buyer', 'seller', 'admin')),
   seller_status VARCHAR(20) DEFAULT 'none' CHECK (seller_status IN ('none', 'pending', 'approved', 'suspended')),
   seller_bio TEXT,
@@ -63,11 +71,18 @@ CREATE TABLE IF NOT EXISTS users (
 ALTER TABLE users ADD COLUMN IF NOT EXISTS department_id INT REFERENCES departments(id);
 ALTER TABLE users ADD COLUMN IF NOT EXISTS school_id VARCHAR(100);
 ALTER TABLE users ADD COLUMN IF NOT EXISTS watermark_code VARCHAR(24);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verification_token_hash CHAR(64);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verification_expires_at TIMESTAMPTZ;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_email_sent_at TIMESTAMPTZ;
 CREATE UNIQUE INDEX IF NOT EXISTS users_watermark_code_unique
   ON users (watermark_code) WHERE watermark_code IS NOT NULL;
+CREATE INDEX IF NOT EXISTS users_email_verification_token_idx
+  ON users (email_verification_token_hash) WHERE email_verification_token_hash IS NOT NULL;
+DROP INDEX IF EXISTS users_school_id_per_university_unique;
 CREATE UNIQUE INDEX IF NOT EXISTS users_school_id_per_university_unique
   ON users (university_id, LOWER(school_id))
-  WHERE school_id IS NOT NULL AND university_id IS NOT NULL;
+  WHERE email_verified = true AND school_id IS NOT NULL AND university_id IS NOT NULL;
 
 -- Documents
 CREATE TABLE IF NOT EXISTS documents (
@@ -392,6 +407,41 @@ async function ensureWatermarkCodes(client) {
   }
 }
 
+async function seedUniversities(client) {
+  for (const university of universityData) {
+    await client.query(`
+      INSERT INTO universities
+        (name, slug, short_name, domain, email_domain_source, is_active)
+      VALUES ($1, $2, $3, $4, $5, true)
+      ON CONFLICT (slug) DO UPDATE
+      SET name = EXCLUDED.name,
+          short_name = EXCLUDED.short_name,
+          domain = EXCLUDED.domain,
+          email_domain_source = EXCLUDED.email_domain_source,
+          is_active = true
+    `, [
+      university.name,
+      university.slug,
+      university.shortName,
+      university.domain,
+      university.domainSource,
+    ]);
+  }
+
+  await client.query(`
+    INSERT INTO departments (university_id, name, slug)
+    SELECT u.id, 'Other / Not listed', 'other'
+    FROM universities u
+    WHERE u.is_active = true
+      AND u.slug = ANY($1::text[])
+      AND NOT EXISTS (
+        SELECT 1 FROM departments d
+        WHERE d.university_id = u.id AND d.is_active = true
+      )
+    ON CONFLICT (university_id, slug) DO NOTHING
+  `, [universityData.map(university => university.slug)]);
+}
+
 async function setup() {
   const client = await pool.connect();
   try {
@@ -400,6 +450,8 @@ async function setup() {
     console.log('✅ Schema created successfully');
     await client.query(seedData);
     console.log('✅ Seed data inserted');
+    await seedUniversities(client);
+    console.log('✅ University list and email domains synchronized');
 
     const adminEmail = process.env.ADMIN_EMAIL || 'admin@scholarnest.co.ke';
     const { rows: adminRows } = await client.query(
@@ -423,8 +475,8 @@ async function setup() {
       const bcrypt = require('bcryptjs');
       const hash = await bcrypt.hash(adminPassword, 12);
       await client.query(`
-        INSERT INTO users (email, password_hash, full_name, role, seller_status, is_verified)
-        VALUES ($1, $2, 'ScholarNest Admin', 'admin', 'approved', true)
+        INSERT INTO users (email, password_hash, full_name, role, seller_status, is_verified, email_verified)
+        VALUES ($1, $2, 'ScholarNest Admin', 'admin', 'approved', true, true)
       `, [adminEmail, hash]);
       console.log('✅ Admin user created');
     }

@@ -65,7 +65,29 @@ app.use('/api/admin', require('./routes/admin'));
 // Universities & departments (public)
 app.get('/api/universities', async (req, res) => {
   const db = require('../config/db');
-  const { rows } = await db.query('SELECT * FROM universities WHERE is_active = true ORDER BY name');
+  const { rows } = await db.query(`
+    SELECT id, name, slug, short_name, domain, logo_url, is_active, created_at
+    FROM universities
+    WHERE is_active = true
+    ORDER BY name
+  `);
+  res.json(rows);
+});
+
+app.get('/api/universities/registration', async (req, res) => {
+  const db = require('../config/db');
+  const { rows } = await db.query(`
+    SELECT un.id, un.name, un.slug, un.short_name, un.domain, un.logo_url, un.is_active
+    FROM universities un
+    LEFT JOIN (
+      SELECT university_id, COUNT(*) AS verified_user_count
+      FROM users
+      WHERE is_active = true AND email_verified = true
+      GROUP BY university_id
+    ) popularity ON popularity.university_id = un.id
+    WHERE un.is_active = true
+    ORDER BY COALESCE(popularity.verified_user_count, 0) DESC, un.created_at, un.name
+  `);
   res.json(rows);
 });
 
