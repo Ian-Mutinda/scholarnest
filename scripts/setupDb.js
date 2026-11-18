@@ -277,9 +277,14 @@ CREATE TABLE IF NOT EXISTS notifications (
   type VARCHAR(50) NOT NULL,
   title VARCHAR(200),
   message TEXT,
+  target_page VARCHAR(50),
+  target_param VARCHAR(100),
   is_read BOOLEAN DEFAULT false,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS target_page VARCHAR(50);
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS target_param VARCHAR(100);
 
 -- Indexes for performance
 CREATE INDEX IF NOT EXISTS idx_documents_university ON documents(university_id);

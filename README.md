@@ -164,6 +164,7 @@ Document uploads currently support PDF only. Every PDF page is checked with Popp
 | Method | Route | Auth | Description |
 |--------|-------|------|-------------|
 | GET | `/api/admin/stats` | Admin | Platform stats |
+| GET | `/api/admin/sales?range=12m` | Admin | Completed sales totals, trends, and university, department, and purchase-type breakdowns (`30d`, `90d`, `12m`, or `all`) |
 | GET | `/api/admin/sellers/pending` | Admin | Pending seller applications |
 | POST | `/api/admin/sellers/:id/approve` | Admin | Approve seller |
 | POST | `/api/admin/sellers/:id/reject` | Admin | Reject seller |

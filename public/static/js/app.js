@@ -5,6 +5,11 @@ const State = {
   registrationUniversities: [],
   registrationUniversitiesExpanded: false,
   emailVerificationToken: null,
+  adminSales: null,
+  adminSalesRange: '12m',
+  adminSalesBreakdown: 'universities',
+  adminSalesShowAll: false,
+  adminSalesRequestId: 0,
   currentDoc: null,
   viewer: { code: null, docId: null, page: 1, totalPages: 1, zoom: 100 },
   marketplace: { uniId: 'all', deptId: 'all', docType: 'all', search: '', page: 1, docs: [] },
@@ -19,11 +24,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   await tryRestoreSession();
   setupSearchDebounce();
   bindStaticListeners();
-  const [initialPage, initialParam] = window.location.hash.slice(1).split('/');
-  if (initialPage === 'verify-email' && initialParam) {
+  const [initialPage, ...initialParams] = window.location.hash.slice(1).split('/');
+  const initialParam = initialParams.join('/') || null;
+  const initialPageExists = Boolean(initialPage && document.getElementById(`page-${initialPage}`));
+  if (initialPageExists && (initialPage !== 'admin' || State.user?.role === 'admin')) {
     navigate(initialPage, initialParam, false);
   } else {
-    window.location.hash = '';
+    window.history.replaceState(null, '', window.location.pathname + window.location.search);
     navigate('marketplace', null, false);
   }
   window.addEventListener('hashchange', handleHashNav);
@@ -123,10 +130,32 @@ function bindStaticListeners() {
   // Seller dashboard
   document.getElementById('seller-upload-btn').addEventListener('click', () => navigate('upload'));
 
-  // Admin tabs
-  document.getElementById('admin-tabs').addEventListener('click', e => {
-    const btn = e.target.closest('.tab-btn');
-    if (btn) switchAdminTab(btn.dataset.tab, btn);
+  // Admin section selector
+  document.getElementById('admin-section-toggle').addEventListener('click', toggleAdminSectionMenu);
+  document.getElementById('admin-section-menu').addEventListener('click', e => {
+    const option = e.target.closest('[data-admin-section]');
+    if (option) navigate('admin', option.dataset.adminSection);
+  });
+  document.getElementById('admin-sales-range').addEventListener('change', e => loadAdminSales(e.target.value));
+  document.getElementById('admin-sales-chart-metric').addEventListener('change', renderAdminSalesChart);
+  document.getElementById('admin-sales-breakdown').addEventListener('change', e => {
+    State.adminSalesBreakdown = e.target.value;
+    State.adminSalesShowAll = false;
+    document.getElementById('admin-sales-search').value = '';
+    document.getElementById('admin-sales-university-filter-group').hidden = e.target.value !== 'departments';
+    renderAdminSalesBreakdown();
+  });
+  document.getElementById('admin-sales-university-filter').addEventListener('change', () => {
+    State.adminSalesShowAll = false;
+    renderAdminSalesBreakdown();
+  });
+  document.getElementById('admin-sales-search').addEventListener('input', () => {
+    State.adminSalesShowAll = false;
+    renderAdminSalesBreakdown();
+  });
+  document.getElementById('admin-sales-show-all').addEventListener('click', () => {
+    State.adminSalesShowAll = !State.adminSalesShowAll;
+    renderAdminSalesBreakdown();
   });
 
   // Payment modal
@@ -136,7 +165,10 @@ function bindStaticListeners() {
     if (e.target === this) closePaymentModal();
   });
   document.addEventListener('keydown', e => {
-    if (e.key === 'Escape') closePaymentModal();
+    if (e.key === 'Escape') {
+      closePaymentModal();
+      closeAdminSectionMenu();
+    }
   });
 
   // Close dropdowns on outside click
@@ -147,6 +179,7 @@ function bindStaticListeners() {
     if (!e.target.closest('#user-avatar-btn') && !e.target.closest('#user-menu-panel')) {
       document.getElementById('user-menu-panel').hidden = true;
     }
+    if (!e.target.closest('#admin-section-picker')) closeAdminSectionMenu();
   });
 
   // Hero search
@@ -156,7 +189,8 @@ function bindStaticListeners() {
 // ─── Navigation ───────────────────────────────────────────────────────────────
 function handleHashNav() {
   const hash = window.location.hash.slice(1) || 'marketplace';
-  const [page, param] = hash.split('/');
+  const [page, ...params] = hash.split('/');
+  const param = params.join('/') || null;
   navigate(page, param, false);
 }
 
@@ -177,9 +211,12 @@ function navigate(page, param = null, pushState = true) {
   if (page === 'marketplace') loadMarketplace();
   if (page === 'document' && param) loadDocumentDetail(param);
   if (page === 'viewer' && param) openViewer(param, State.viewer.code);
-  if (page === 'my-codes') loadMyCodes();
-  if (page === 'seller-dashboard') loadSellerDashboard();
-  if (page === 'admin') loadAdminPanel();
+  if (page === 'my-codes') loadMyCodes(param);
+  if (page === 'seller-dashboard') loadSellerDashboard(param);
+  if (page === 'admin') {
+    const [section, targetId] = (param || 'overview').split('/');
+    loadAdminPanel(section, targetId);
+  }
   if (page === 'upload') loadUploadForm();
   if (page === 'access') setupAccessPage();
 
@@ -342,7 +379,12 @@ async function confirmEmailVerification() {
 
 async function logout() {
   await API.auth.logout().catch(() => {});
+  sessionStorage.removeItem('viewer-access-doc-id');
+  sessionStorage.removeItem('viewer-access-code');
+  sessionStorage.removeItem('seller-preview-doc-id');
   State.user = null;
+  State.viewer.code = null;
+  State.viewer.docId = null;
   setUser(null);
   navigate('marketplace');
   showToast('Logged out');
@@ -646,6 +688,7 @@ async function loadDocumentDetail(docId) {
     document.getElementById('seller-preview-btn')?.addEventListener('click', function() {
       State.viewer.code = 'SELLER';
       State.viewer.docId = this.dataset.id;
+      sessionStorage.setItem('seller-preview-doc-id', String(this.dataset.id));
       navigate('viewer', this.dataset.id);
     });
     document.getElementById('buy-doc-btn')?.addEventListener('click', function() {
@@ -660,6 +703,14 @@ async function loadDocumentDetail(docId) {
 }
 // ─── Viewer ───────────────────────────────────────────────────────────────────
 async function openViewer(docId, code) {
+  code = code || State.viewer.code;
+  if (!code && State.user?.role === 'seller' &&
+      sessionStorage.getItem('seller-preview-doc-id') === String(docId)) {
+    code = 'SELLER';
+  }
+  if (!code && sessionStorage.getItem('viewer-access-doc-id') === String(docId)) {
+    code = sessionStorage.getItem('viewer-access-code');
+  }
   if (!code && State.user?.role !== 'admin' && State.viewer.code !== 'SELLER') {
     navigate('access'); return;
   }
@@ -688,6 +739,8 @@ async function openViewer(docId, code) {
 
   try {
     const result = await API.payments.validateCode({ code, document_id: docId });
+    sessionStorage.setItem('viewer-access-doc-id', String(docId));
+    sessionStorage.setItem('viewer-access-code', code);
     State.viewer.totalPages = result.totalPages || 1;
     document.getElementById('viewer-title').textContent = result.documentTitle || 'Document';
     document.getElementById('viewer-subtitle').textContent = `Code: ${code} · Locked to this device`;
@@ -844,7 +897,7 @@ async function submitAccessCode() {
   }
 }
 // ─── My Codes ─────────────────────────────────────────────────────────────────
-async function loadMyCodes() {
+async function loadMyCodes(targetCodeId = null) {
   const list = document.getElementById('my-codes-list');
   list.innerHTML = '<div class="empty-state"><i class="ti ti-loader ti-spin"></i></div>';
   try {
@@ -858,7 +911,7 @@ async function loadMyCodes() {
       const label = c.document_title || c.pass_name || 'Document';
       const days = expired ? 'Expired' : `Expires ${relativeTime(c.expires_at)}`;
       return `
-      <div class="code-row">
+      <div class="code-row" id="access-code-${c.id}">
         <div>
           <div class="code-value">${c.code}</div>
           <div style="font-size:11px;margin-top:3px" class="${c.device_bound_at ? 'code-bound' : ''}">
@@ -879,6 +932,7 @@ async function loadMyCodes() {
     list.querySelectorAll('.open-code-btn').forEach(btn => {
       btn.addEventListener('click', () => activateCode(btn.dataset.code));
     });
+    if (targetCodeId) focusNotificationTarget(`access-code-${targetCodeId}`);
   } catch {
     list.innerHTML = '<div class="empty-state"><p>Failed to load codes</p></div>';
   }
@@ -983,7 +1037,7 @@ async function initiatePayment() {
 }
 
 // ─── Seller dashboard ─────────────────────────────────────────────────────────
-async function loadSellerDashboard() {
+async function loadSellerDashboard(targetDocumentId = null) {
   try {
     const data = await API.seller.dashboard();
     document.getElementById('seller-stats-grid').innerHTML = [
@@ -1000,7 +1054,7 @@ async function loadSellerDashboard() {
       docsList.innerHTML = '<div class="empty-state"><i class="ti ti-file-off"></i><p>No documents yet.</p></div>';
     } else {
       docsList.innerHTML = docs.map(d => `
-        <div class="seller-doc-row">
+        <div class="seller-doc-row" id="seller-document-${d.id}">
           <div class="seller-doc-info">
             <div class="seller-doc-title">${escHtml(d.title)}</div>
             <div class="seller-doc-meta">${d.course_code || '—'} · ${d.total_purchases} sales · ${d.avg_rating > 0 ? '★ ' + parseFloat(d.avg_rating).toFixed(1) : 'No ratings'}</div>
@@ -1009,6 +1063,7 @@ async function loadSellerDashboard() {
           <span class="doc-status-badge status-${d.status}">${d.status}</span>
         </div>`).join('');
     }
+    if (targetDocumentId) focusNotificationTarget(`seller-document-${targetDocumentId}`);
 
     const salesList = document.getElementById('seller-sales-list');
     if (!data.recentSales?.length) {
@@ -1179,7 +1234,51 @@ async function submitUpload() {
 }
 
 // ─── Admin ────────────────────────────────────────────────────────────────────
-async function loadAdminPanel() {
+const ADMIN_SECTIONS = {
+  overview: 'Overview',
+  sellers: 'Pending sellers',
+  sales: 'Sales analytics',
+  documents: 'Document review',
+  payouts: 'Payouts due',
+  'all-users': 'All users',
+  'all-documents': 'All documents',
+};
+
+function toggleAdminSectionMenu() {
+  const menu = document.getElementById('admin-section-menu');
+  const toggle = document.getElementById('admin-section-toggle');
+  menu.hidden = !menu.hidden;
+  toggle.setAttribute('aria-expanded', String(!menu.hidden));
+}
+
+function closeAdminSectionMenu() {
+  const menu = document.getElementById('admin-section-menu');
+  const toggle = document.getElementById('admin-section-toggle');
+  menu.hidden = true;
+  toggle.setAttribute('aria-expanded', 'false');
+}
+
+async function loadAdminPanel(section = 'overview', targetId = null) {
+  if (!Object.prototype.hasOwnProperty.call(ADMIN_SECTIONS, section)) section = 'overview';
+  document.querySelectorAll('#page-admin .admin-tab').forEach(view => view.classList.remove('active'));
+  document.getElementById(`admin-tab-${section}`).classList.add('active');
+  document.getElementById('admin-section-title').textContent = ADMIN_SECTIONS[section];
+  document.querySelectorAll('[data-admin-section]').forEach(option => {
+    if (option.dataset.adminSection === section) option.setAttribute('aria-current', 'page');
+    else option.removeAttribute('aria-current');
+  });
+  closeAdminSectionMenu();
+
+  if (section === 'overview') loadAdminOverview();
+  if (section === 'sellers') loadAdminSellers(targetId);
+  if (section === 'sales') loadAdminSales();
+  if (section === 'documents') loadAdminDocs(targetId);
+  if (section === 'payouts') loadAdminPayouts();
+  if (section === 'all-users') loadAdminUsers();
+  if (section === 'all-documents') loadAdminAllDocuments();
+}
+
+async function loadAdminOverview() {
   try {
     const stats = await API.admin.stats();
     document.getElementById('admin-stats-grid').innerHTML = [
@@ -1190,16 +1289,15 @@ async function loadAdminPanel() {
       { val: stats.pendingDocuments, lbl: 'Docs to review' },
       { val: stats.pendingSellers, lbl: 'Seller applications' },
     ].map(s => `<div class="stat-card"><div class="stat-val">${s.val}</div><div class="stat-lbl">${s.lbl}</div></div>`).join('');
-    loadAdminSellers();
   } catch {}
 }
 
-async function loadAdminSellers() {
+async function loadAdminSellers(targetSellerId = null) {
   const list = document.getElementById('admin-sellers-list');
   const sellers = await API.admin.pendingSellers().catch(() => []);
   if (!sellers.length) { list.innerHTML = '<div class="empty-state-sm">No pending applications</div>'; return; }
   list.innerHTML = sellers.map(s => `
-    <div class="admin-row">
+    <div class="admin-row" id="admin-pending-seller-${s.id}">
       <div class="admin-row-info">
         <div class="admin-row-title">${escHtml(s.full_name)}</div>
         <div class="admin-row-sub">${escHtml(s.email)} · ${escHtml(s.university_name || '—')} · Applied ${relativeTime(s.created_at)}</div>
@@ -1217,9 +1315,258 @@ async function loadAdminSellers() {
   list.querySelectorAll('.reject-seller-btn').forEach(btn => {
     btn.addEventListener('click', () => adminRejectSeller(btn.dataset.id));
   });
+  if (targetSellerId) focusNotificationTarget(`admin-pending-seller-${targetSellerId}`);
 }
 
-async function loadAdminDocs() {
+async function loadAdminSales(range = document.getElementById('admin-sales-range').value) {
+  const error = document.getElementById('admin-sales-error');
+  const requestId = ++State.adminSalesRequestId;
+  State.adminSales = null;
+  State.adminSalesRange = range;
+  document.getElementById('admin-sales-range').value = range;
+  error.hidden = true;
+  document.getElementById('admin-sales-summary').replaceChildren();
+  document.getElementById('admin-sales-chart').textContent = 'Loading sales trend…';
+  document.getElementById('admin-sales-breakdown-table').textContent = 'Loading breakdown…';
+  try {
+    const sales = await API.admin.sales(range);
+    if (requestId !== State.adminSalesRequestId) return;
+    State.adminSales = sales;
+
+    const universityFilter = document.getElementById('admin-sales-university-filter');
+    const selectedUniversity = universityFilter.value;
+    if (universityFilter.options.length <= 1) {
+      State.universities.forEach(university => {
+        universityFilter.add(new Option(university.name, String(university.id)));
+      });
+    }
+    universityFilter.value = selectedUniversity;
+
+    renderAdminSalesSummary(sales);
+    renderAdminSalesChart();
+    document.getElementById('admin-sales-university-filter-group').hidden =
+      State.adminSalesBreakdown !== 'departments';
+    renderAdminSalesBreakdown();
+  } catch (err) {
+    if (requestId !== State.adminSalesRequestId) return;
+    error.textContent = err.message || 'Unable to load sales analytics.';
+    error.hidden = false;
+  }
+}
+
+function renderAdminSalesSummary(sales) {
+  const labels = {
+    grossSales: 'Gross sales',
+    transactions: 'Completed purchases',
+    platformRevenue: 'Platform revenue',
+    averageSale: 'Average order value',
+  };
+  const cards = Object.keys(labels).map(key => {
+    const value = Number(sales.summary[key]) || 0;
+    const previous = sales.previousSummary ? Number(sales.previousSummary[key]) || 0 : null;
+    let comparison = 'All-time total';
+    let comparisonClass = 'neutral';
+    if (previous !== null) {
+      if (previous === 0) {
+        comparison = value === 0 ? 'No change from previous period' : 'No activity in previous period';
+      } else {
+        const change = ((value - previous) / previous) * 100;
+        comparison = `${change > 0 ? '+' : ''}${change.toFixed(1)}% vs previous period`;
+        comparisonClass = change > 0 ? 'positive' : change < 0 ? 'negative' : 'neutral';
+      }
+    }
+    return `
+      <article class="admin-sales-kpi">
+        <span class="admin-sales-kpi-label">${labels[key]}</span>
+        <strong>${key === 'transactions' ? value.toLocaleString() : formatKsh(value)}</strong>
+        <span class="admin-sales-kpi-change ${comparisonClass}">${comparison}</span>
+      </article>`;
+  });
+  document.getElementById('admin-sales-summary').innerHTML = cards.join('');
+}
+
+function renderAdminSalesChart() {
+  if (!State.adminSales) return;
+  const metric = document.getElementById('admin-sales-chart-metric').value;
+  const metricLabels = {
+    grossSales: 'Gross sales',
+    transactions: 'Completed purchases',
+    platformRevenue: 'Platform revenue',
+  };
+  const periods = State.adminSales.trend || [];
+  const description = `${metricLabels[metric]} ${State.adminSalesRange === 'all' ? 'over all time' : `over the ${rangeLabel(State.adminSalesRange).toLowerCase()}`}`;
+  document.getElementById('admin-sales-chart-description').textContent = description;
+  const container = document.getElementById('admin-sales-chart');
+  if (!periods.length) {
+    container.textContent = 'No completed sales in this period.';
+    return;
+  }
+
+  const width = 960;
+  const height = 320;
+  const padding = { top: 20, right: 24, bottom: 42, left: 76 };
+  const plotWidth = width - padding.left - padding.right;
+  const plotHeight = height - padding.top - padding.bottom;
+  const values = periods.map(period => Number(period[metric]) || 0);
+  const maxValue = Math.max(1, values.reduce((maximum, value) => Math.max(maximum, value), 0));
+  const points = values.map((value, index) => ({
+    x: padding.left + (periods.length === 1 ? plotWidth / 2 : index * plotWidth / (periods.length - 1)),
+    y: padding.top + plotHeight - value / maxValue * plotHeight,
+    value,
+  }));
+  const yTicks = [0, 0.5, 1].map(fraction => {
+    const y = padding.top + plotHeight - fraction * plotHeight;
+    const value = maxValue * fraction;
+    const label = metric === 'transactions'
+      ? Math.round(value).toLocaleString()
+      : formatCompactKsh(value);
+    return `<g class="admin-sales-chart-tick">
+      <line x1="${padding.left}" y1="${y}" x2="${width - padding.right}" y2="${y}"></line>
+      <text x="${padding.left - 12}" y="${y + 4}" text-anchor="end">${label}</text>
+    </g>`;
+  }).join('');
+  const labelIndexes = [...new Set([0, Math.floor((periods.length - 1) / 2), periods.length - 1])];
+  const xLabels = labelIndexes.map(index => `
+    <text class="admin-sales-chart-x-label" x="${points[index].x}" y="${height - 12}" text-anchor="middle">
+      ${escHtml(periods[index].label)}
+    </text>`).join('');
+  const line = points.map(point => `${point.x},${point.y}`).join(' ');
+  const markers = points.map((point, index) => `
+    <circle class="admin-sales-chart-point" cx="${point.x}" cy="${point.y}" r="4" tabindex="0">
+      <title>${escHtml(periods[index].label)}: ${metric === 'transactions' ? point.value.toLocaleString() : formatKsh(point.value)}</title>
+    </circle>`).join('');
+
+  container.innerHTML = `
+    <svg class="admin-sales-chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escHtml(description)}">
+      ${yTicks}
+      <polyline class="admin-sales-chart-line" points="${line}"></polyline>
+      ${markers}
+      ${xLabels}
+    </svg>`;
+}
+
+function formatCompactKsh(value) {
+  if (value >= 1000000) return `KSh ${(value / 1000000).toFixed(1)}m`;
+  if (value >= 1000) return `KSh ${(value / 1000).toFixed(1)}k`;
+  return `KSh ${Math.round(value)}`;
+}
+
+function rangeLabel(range) {
+  return ({
+    '30d': 'Last 30 days',
+    '90d': 'Last 90 days',
+    '12m': 'Last 12 months',
+    all: 'All time',
+  })[range] || 'Last 12 months';
+}
+
+function renderAdminSalesBreakdown() {
+  if (!State.adminSales) return;
+  const view = State.adminSalesBreakdown;
+  const universityId = document.getElementById('admin-sales-university-filter').value;
+  const search = document.getElementById('admin-sales-search').value.trim().toLowerCase();
+  let rows = State.adminSales[view] || [];
+  if (view === 'departments' && universityId) {
+    rows = rows.filter(row => String(row.universityId) === universityId);
+  }
+
+  let columns;
+  if (view === 'departments') {
+    columns = [
+      { label: 'University', value: row => row.universityName },
+      { label: 'Department', value: row => row.departmentName },
+      { label: 'Purchases', value: row => Number(row.transactions).toLocaleString() },
+      { label: 'Gross sales', value: row => formatKsh(row.grossSales) },
+      { label: 'Platform revenue', value: row => formatKsh(row.platformRevenue) },
+    ];
+  } else if (view === 'purchaseTypes') {
+    columns = [
+      { label: 'Purchase type', value: row => row.purchaseType },
+      { label: 'Purchases', value: row => Number(row.transactions).toLocaleString() },
+      { label: 'Gross sales', value: row => formatKsh(row.grossSales) },
+      { label: 'Platform revenue', value: row => formatKsh(row.platformRevenue) },
+    ];
+  } else {
+    columns = [
+      { label: 'University', value: row => row.universityName },
+      { label: 'Purchases', value: row => Number(row.transactions).toLocaleString() },
+      { label: 'Gross sales', value: row => formatKsh(row.grossSales) },
+      { label: 'Platform revenue', value: row => formatKsh(row.platformRevenue) },
+    ];
+  }
+
+  if (search) {
+    rows = rows.filter(row => columns.some(column => String(column.value(row)).toLowerCase().includes(search)));
+  }
+  const allRows = rows;
+  const visibleRows = State.adminSalesShowAll ? allRows : allRows.slice(0, 10);
+  renderAdminSalesTable(columns, visibleRows, view);
+  const showAll = document.getElementById('admin-sales-show-all');
+  showAll.hidden = allRows.length <= 10;
+  showAll.textContent = State.adminSalesShowAll ? 'Show fewer results' : `Show all ${allRows.length} results`;
+}
+
+function renderAdminSalesTable(columns, rows, view) {
+  const container = document.getElementById('admin-sales-breakdown-table');
+  container.replaceChildren();
+  if (!rows.length) {
+    const empty = document.createElement('div');
+    empty.className = 'empty-state-sm';
+    empty.textContent = 'No sales match this selection.';
+    container.appendChild(empty);
+    return;
+  }
+
+  const wrapper = document.createElement('div');
+  wrapper.className = 'admin-sales-table-wrap';
+  const table = document.createElement('table');
+  table.className = 'admin-sales-table';
+  const head = document.createElement('thead');
+  const headerRow = document.createElement('tr');
+  columns.forEach(column => {
+    const cell = document.createElement('th');
+    cell.textContent = column.label;
+    headerRow.appendChild(cell);
+  });
+  head.appendChild(headerRow);
+  table.appendChild(head);
+
+  const body = document.createElement('tbody');
+  rows.forEach(row => {
+    const tableRow = document.createElement('tr');
+    columns.forEach((column, index) => {
+      const cell = document.createElement('td');
+      if (view === 'universities' && index === 0 && row.universityId) {
+        const link = document.createElement('button');
+        link.type = 'button';
+        link.className = 'admin-sales-drill-link';
+        link.textContent = column.value(row);
+        link.setAttribute('aria-label', `View department sales for ${row.universityName}`);
+        link.addEventListener('click', () => selectAdminSalesUniversity(row.universityId));
+        cell.appendChild(link);
+      } else {
+        cell.textContent = column.value(row);
+      }
+      tableRow.appendChild(cell);
+    });
+    body.appendChild(tableRow);
+  });
+  table.appendChild(body);
+  wrapper.appendChild(table);
+  container.appendChild(wrapper);
+}
+
+function selectAdminSalesUniversity(universityId) {
+  State.adminSalesBreakdown = 'departments';
+  State.adminSalesShowAll = false;
+  document.getElementById('admin-sales-breakdown').value = 'departments';
+  document.getElementById('admin-sales-university-filter-group').hidden = false;
+  document.getElementById('admin-sales-university-filter').value = String(universityId);
+  document.getElementById('admin-sales-search').value = '';
+  renderAdminSalesBreakdown();
+}
+
+async function loadAdminDocs(targetDocumentId = null) {
   const list = document.getElementById('admin-docs-list');
   const docs = await API.admin.pendingDocs().catch(() => []);
   if (!docs.length) { list.innerHTML = '<div class="empty-state-sm">No documents pending review</div>'; return; }
@@ -1255,7 +1602,7 @@ async function loadAdminDocs() {
           : 'Privacy scan is pending or was not run. Human privacy review is required.';
     const humanReviewRequired = scanStatus !== 'clear';
     return `
-    <div class="admin-row">
+    <div class="admin-row" id="admin-pending-document-${d.id}">
       <div class="admin-row-info">
         <div class="admin-row-title">${escHtml(d.title)}</div>
         <div class="admin-row-sub">${escHtml(d.seller_name)} · ${d.short_name} ${escHtml(d.department)} · ${d.total_pages} pages · Plagiarism: ${d.plagiarism_score}%</div>
@@ -1295,6 +1642,7 @@ async function loadAdminDocs() {
   list.querySelectorAll('.reject-doc-btn').forEach(btn => {
     btn.addEventListener('click', () => adminRejectDoc(btn.dataset.id));
   });
+  if (targetDocumentId) focusNotificationTarget(`admin-pending-document-${targetDocumentId}`);
 }
 
 async function loadAdminPayouts() {
@@ -1315,18 +1663,6 @@ async function loadAdminPayouts() {
   list.querySelectorAll('.process-payout-btn').forEach(btn => {
     btn.addEventListener('click', () => adminProcessPayout(btn.dataset.id));
   });
-}
-
-function switchAdminTab(tab, btn) {
-  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-  document.querySelectorAll('.admin-tab').forEach(t => t.classList.remove('active'));
-  btn.classList.add('active');
-  document.getElementById(`admin-tab-${tab}`).classList.add('active');
-  if (tab === 'sellers') loadAdminSellers();
-  if (tab === 'documents') loadAdminDocs();
-  if (tab === 'payouts') loadAdminPayouts();
-  if (tab === 'all-users') loadAdminUsers();
-  if (tab === 'all-documents') loadAdminAllDocuments();
 }
 
 async function adminApproveSeller(id) {
@@ -1368,18 +1704,74 @@ async function loadNotifications() {
     const list = document.getElementById('notif-list');
     if (!notifs.length) { list.innerHTML = '<div class="empty-state-sm">No notifications</div>'; return; }
     list.innerHTML = notifs.map(n => `
-      <div class="notif-item ${n.is_read ? '' : 'unread'}" data-id="${n.id}">
+      <button type="button" class="notif-item ${n.is_read ? '' : 'unread'}">
         <div class="notif-title">${escHtml(n.title)}</div>
         <div class="notif-msg">${escHtml(n.message)}</div>
-      </div>`).join('');
+      </button>`).join('');
 
-    list.querySelectorAll('.notif-item').forEach(item => {
-      item.addEventListener('click', function() {
-        this.classList.remove('unread');
-        API.markNotifRead(this.dataset.id).catch(() => {});
+    list.querySelectorAll('.notif-item').forEach((item, index) => {
+      item.addEventListener('click', () => {
+        handleNotificationClick(notifs[index], item);
       });
     });
   } catch {}
+}
+
+async function handleNotificationClick(notification, item) {
+  if (!notification.is_read) {
+    try {
+      await API.markNotifRead(notification.id);
+      item.classList.remove('unread');
+      document.getElementById('notif-dot').hidden =
+        document.querySelector('.notif-item.unread') === null;
+    } catch (err) {
+      showToast(err.message || 'Failed to mark notification as read');
+    }
+  }
+
+  const destination = resolveNotificationDestination(notification);
+  closeDropdowns();
+  if (destination) navigate(destination.page, destination.param);
+}
+
+function resolveNotificationDestination(notification) {
+  if (notification.target_page === 'admin') {
+    const [section, targetId, ...extra] = String(notification.target_param || 'overview').split('/');
+    const validSection = Object.prototype.hasOwnProperty.call(ADMIN_SECTIONS, section);
+    if (validSection && extra.length === 0 && (!targetId || /^\d+$/.test(targetId))) {
+      return { page: 'admin', param: `${section}${targetId ? `/${targetId}` : ''}` };
+    }
+  } else if (['seller-dashboard', 'my-codes'].includes(notification.target_page)) {
+    const targetId = String(notification.target_param || '');
+    if (!targetId || /^\d+$/.test(targetId)) {
+      return { page: notification.target_page, param: targetId || null };
+    }
+  }
+
+  const fallbackRoutes = {
+    seller_approved: { page: 'seller-dashboard' },
+    seller_rejected: { page: 'seller-dashboard' },
+    document_approved: { page: 'seller-dashboard' },
+    document_rejected: { page: 'seller-dashboard' },
+    purchase_complete: { page: 'my-codes' },
+    new_seller_application: { page: 'admin', param: 'sellers' },
+    new_document_review: { page: 'admin', param: 'documents' },
+    document_review_failed: { page: 'admin', param: 'documents' },
+  };
+  const destination = fallbackRoutes[notification.type];
+  if (destination?.page === 'admin' && notification.type === 'document_review_failed') {
+    const match = String(notification.message || '').match(/Document #(\d+)/);
+    return { page: 'admin', param: match ? `documents/${match[1]}` : 'documents' };
+  }
+  return destination ? { ...destination } : null;
+}
+
+function focusNotificationTarget(elementId) {
+  const element = document.getElementById(elementId);
+  if (!element) return;
+  element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  element.classList.add('notification-target-highlight');
+  setTimeout(() => element.classList.remove('notification-target-highlight'), 3000);
 }
 
 function markAllRead() {
@@ -1402,6 +1794,7 @@ function toggleUserMenu() {
 function closeDropdowns() {
   document.getElementById('notif-panel').hidden = true;
   document.getElementById('user-menu-panel').hidden = true;
+  closeAdminSectionMenu();
 }
 
 // ─── Device info ──────────────────────────────────────────────────────────────
@@ -1454,6 +1847,11 @@ function handleSearch(val) {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+function formatKsh(value) {
+  const amount = Number(value) || 0;
+  return `KSh ${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
 function escHtml(str) {
   if (!str) return '';
   return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -1525,12 +1923,21 @@ function renderUsersList() {
 
   if (!filtered.length) { list.innerHTML = '<div class="empty-state-sm">No users found</div>'; return; }
 
-  list.innerHTML = filtered.map(u => `
+  list.innerHTML = filtered.map(u => {
+    const sellerStatusClass = u.seller_status === 'approved' ? 'status-approved'
+      : u.seller_status === 'suspended' ? 'status-rejected' : 'status-pending';
+    const accountActions = u.role === 'seller' && u.seller_status === 'suspended'
+      ? `<button class="btn btn-sm btn-primary reactivate-seller-btn" data-id="${u.id}">Reactivate seller</button>`
+      : u.is_active
+        ? `<button class="btn btn-sm btn-danger deactivate-user-btn" data-id="${u.id}">Deactivate</button>`
+        : `<button class="btn btn-sm btn-primary restore-user-btn" data-id="${u.id}">Restore</button>`;
+    return `
     <div class="admin-row">
       <div class="admin-row-info">
         <div class="admin-row-title">${escHtml(u.full_name)}
           <span class="doc-status-badge ${u.is_active ? 'status-approved' : 'status-rejected'}">${u.is_active ? 'active' : 'deactivated'}</span>
           <span class="doc-status-badge status-pending">${u.role}</span>
+          ${u.role === 'seller' ? `<span class="doc-status-badge ${sellerStatusClass}">${escHtml(u.seller_status || 'pending')}</span>` : ''}
         </div>
         <div class="admin-row-sub">
           ${escHtml(u.email)} · ${escHtml(u.university_name || '—')} · ${escHtml(u.department_name || '—')} ·
@@ -1538,16 +1945,14 @@ function renderUsersList() {
         </div>
       </div>
       <div class="admin-row-actions">
-        ${u.is_active
-          ? `<button class="btn btn-sm btn-danger deactivate-user-btn" data-id="${u.id}">Deactivate</button>`
-          : `<button class="btn btn-sm btn-primary restore-user-btn" data-id="${u.id}">Restore</button>`
-        }
-        ${u.role === 'seller' && u.seller_status === 'approved'
+        ${accountActions}
+        ${u.role === 'seller' && u.seller_status === 'approved' && u.is_active
           ? `<button class="btn btn-sm btn-ghost suspend-seller-btn" data-id="${u.id}">Suspend</button>`
           : ''
         }
       </div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 
   list.querySelectorAll('.deactivate-user-btn').forEach(btn => {
     btn.addEventListener('click', async () => {
@@ -1571,6 +1976,20 @@ function renderUsersList() {
       if (!confirm('Suspend this seller?')) return;
       await API.admin.suspendSeller(btn.dataset.id).catch(err => showToast(err.message));
       showToast('Seller suspended');
+      _allUsersData = await API.admin.allUsers().catch(() => []);
+      renderUsersList();
+    });
+  });
+  list.querySelectorAll('.reactivate-seller-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (!confirm('Reactivate this seller account?')) return;
+      try {
+        await API.admin.reactivateSeller(btn.dataset.id);
+      } catch (err) {
+        showToast(err.message);
+        return;
+      }
+      showToast('Seller reactivated');
       _allUsersData = await API.admin.allUsers().catch(() => []);
       renderUsersList();
     });

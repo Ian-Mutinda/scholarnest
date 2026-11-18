@@ -404,17 +404,97 @@
 
       <!-- ADMIN -->
       <div id="page-admin" class="page">
-        <div class="page-wrap">
-          <div class="page-header"><h1>Admin panel</h1></div>
-          <div id="admin-stats-grid" class="stats-grid"></div>
-          <div class="admin-tabs" id="admin-tabs">
-            <button class="tab-btn active" data-tab="sellers">Pending sellers</button>
-            <button class="tab-btn" data-tab="documents">Documents to review</button>
-            <button class="tab-btn" data-tab="payouts">Payouts due</button>
-            <button class="tab-btn" data-tab="all-users">All users</button>
-            <button class="tab-btn" data-tab="all-documents">All documents</button>
+        <div class="page-wrap admin-page-wrap">
+          <div class="admin-page-header">
+            <div class="admin-page-heading">
+              <p class="admin-eyebrow">ADMINISTRATION</p>
+              <div class="admin-page-title-row">
+                <h1 id="admin-section-title">Overview</h1>
+                <div class="admin-section-picker" id="admin-section-picker">
+                  <button id="admin-section-toggle" class="admin-section-toggle" type="button" aria-label="Choose admin section" title="Choose admin section" aria-haspopup="menu" aria-expanded="false">
+                    <span class="admin-section-chevron" aria-hidden="true"></span>
+                  </button>
+                  <div id="admin-section-menu" class="admin-section-menu" role="menu" hidden>
+                    <button class="admin-section-option" type="button" role="menuitem" data-admin-section="overview">Overview</button>
+                    <button class="admin-section-option" type="button" role="menuitem" data-admin-section="sellers">Pending sellers</button>
+                    <button class="admin-section-option" type="button" role="menuitem" data-admin-section="sales">Sales analytics</button>
+                    <button class="admin-section-option" type="button" role="menuitem" data-admin-section="documents">Document review</button>
+                    <button class="admin-section-option" type="button" role="menuitem" data-admin-section="payouts">Payouts due</button>
+                    <button class="admin-section-option" type="button" role="menuitem" data-admin-section="all-users">All users</button>
+                    <button class="admin-section-option" type="button" role="menuitem" data-admin-section="all-documents">All documents</button>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
-          <div id="admin-tab-sellers" class="admin-tab active"><div id="admin-sellers-list"></div></div>
+
+          <div id="admin-tab-overview" class="admin-tab active">
+            <div id="admin-stats-grid" class="stats-grid"></div>
+          </div>
+          <div id="admin-tab-sellers" class="admin-tab"><div id="admin-sellers-list"></div></div>
+          <div id="admin-tab-sales" class="admin-tab">
+            <div class="admin-sales-toolbar">
+              <p class="admin-sales-note">Completed purchases only. Pending, failed, and refunded payments are excluded.</p>
+              <label class="admin-sales-control">
+                <span>Date range</span>
+                <select id="admin-sales-range" class="field-input">
+                  <option value="30d">Last 30 days</option>
+                  <option value="90d">Last 90 days</option>
+                  <option value="12m" selected>Last 12 months</option>
+                  <option value="all">All time</option>
+                </select>
+              </label>
+            </div>
+            <div id="admin-sales-error" class="field-error" hidden></div>
+            <div id="admin-sales-summary" class="stats-grid"></div>
+            <section class="admin-sales-card">
+              <div class="admin-sales-section-header">
+                <div>
+                  <h2>Sales trend</h2>
+                  <p id="admin-sales-chart-description">Gross sales over the selected period</p>
+                </div>
+                <label class="admin-sales-control">
+                  <span>Show</span>
+                  <select id="admin-sales-chart-metric" class="field-input">
+                    <option value="grossSales">Gross sales</option>
+                    <option value="transactions">Purchases</option>
+                    <option value="platformRevenue">Platform revenue</option>
+                  </select>
+                </label>
+              </div>
+              <div id="admin-sales-chart" class="admin-sales-chart"></div>
+            </section>
+            <section class="admin-sales-card">
+              <div class="admin-sales-section-header">
+                <div>
+                  <h2>Sales breakdown</h2>
+                  <p>Choose a category to compare performance.</p>
+                </div>
+                <div class="admin-sales-breakdown-controls">
+                  <label class="admin-sales-control">
+                    <span>Break down by</span>
+                    <select id="admin-sales-breakdown" class="field-input">
+                      <option value="universities">University</option>
+                      <option value="departments">Department</option>
+                      <option value="purchaseTypes">Purchase type</option>
+                    </select>
+                  </label>
+                  <label class="admin-sales-control" id="admin-sales-university-filter-group" hidden>
+                    <span>University</span>
+                    <select id="admin-sales-university-filter" class="field-input" aria-label="Filter department sales by university">
+                      <option value="">All universities</option>
+                    </select>
+                  </label>
+                  <label class="admin-sales-control">
+                    <span>Search</span>
+                    <input id="admin-sales-search" class="field-input" type="search" placeholder="Search results">
+                  </label>
+                </div>
+              </div>
+              <div id="admin-sales-breakdown-table"></div>
+              <button id="admin-sales-show-all" class="link-btn admin-sales-show-all" type="button" hidden>Show all results</button>
+            </section>
+          </div>
           <div id="admin-tab-documents" class="admin-tab"><div id="admin-docs-list"></div></div>
           <div id="admin-tab-payouts" class="admin-tab"><div id="admin-payouts-list"></div></div>
           <div id="admin-tab-all-users" class="admin-tab"><div id="admin-users-list"></div></div>

@@ -62,6 +62,7 @@ const API = {
   // Admin
   admin: {
     stats:           ()       => API.get('/admin/stats'),
+    sales:           (range)  => API.get(`/admin/sales?range=${encodeURIComponent(range)}`),
     pendingSellers:  ()       => API.get('/admin/sellers/pending'),
     approveSeller:   (id)     => API.post(`/admin/sellers/${id}/approve`),
     rejectSeller:    (id, r)  => API.post(`/admin/sellers/${id}/reject`, { reason: r }),
@@ -75,6 +76,7 @@ const API = {
     deleteUser:      (id)     => API.delete(`/admin/users/${id}`),
     restoreUser:     (id)     => API.post(`/admin/users/${id}/restore`),
     suspendSeller:   (id)     => API.post(`/admin/sellers/${id}/suspend`),
+    reactivateSeller:(id)     => API.post(`/admin/sellers/${id}/reactivate`),
     allDocuments:    ()       => API.get('/admin/documents/all'),
     verifyWatermark: (data)   => API.post('/admin/watermarks/verify', data),
     deleteDocument:  (id)     => API.delete(`/admin/documents/${id}`),

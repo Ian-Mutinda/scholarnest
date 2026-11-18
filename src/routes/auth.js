@@ -147,10 +147,10 @@ router.post('/verify-email', [
     if (user.role === 'seller') {
       try {
         await db.query(`
-          INSERT INTO notifications (user_id, type, title, message)
-          SELECT id, 'new_seller_application', 'New seller application', $1
+          INSERT INTO notifications (user_id, type, title, message, target_page, target_param)
+          SELECT id, 'new_seller_application', 'New seller application', $1, 'admin', $2
           FROM users WHERE role = 'admin' LIMIT 1
-        `, [`${user.full_name} has applied to become a seller.`]);
+        `, [`${user.full_name} has applied to become a seller.`, `sellers/${user.id}`]);
       } catch (err) {
         console.error('Failed to notify admins about seller application:', err.message);
       }

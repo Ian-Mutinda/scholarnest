@@ -32,6 +32,172 @@ router.get('/stats', async (req, res) => {
   }
 });
 
+router.get('/sales', async (req, res) => {
+  const ranges = {
+    '30d': { interval: '30 days', previous: '60 days', unit: 'day', step: '1 day', format: 'DD Mon' },
+    '90d': { interval: '90 days', previous: '180 days', unit: 'week', step: '1 week', format: 'DD Mon' },
+    '12m': { interval: '12 months', previous: '24 months', unit: 'month', step: '1 month', format: 'Mon YYYY' },
+    all: { interval: null, previous: null, unit: 'month', step: '1 month', format: 'Mon YYYY' },
+  };
+  const range = Object.prototype.hasOwnProperty.call(ranges, req.query.range)
+    ? req.query.range
+    : '12m';
+  const rangeConfig = ranges[range];
+  const periodFilter = rangeConfig.interval
+    ? `AND p.created_at >= NOW() - INTERVAL '${rangeConfig.interval}'`
+    : '';
+  const previousPeriodFilter = rangeConfig.previous
+    ? `AND p.created_at >= NOW() - INTERVAL '${rangeConfig.previous}' AND p.created_at < NOW() - INTERVAL '${rangeConfig.interval}'`
+    : null;
+  const completedSalesFrom = `
+    FROM purchases p
+    LEFT JOIN documents d
+      ON p.purchase_type = 'individual' AND d.id = p.document_id
+    LEFT JOIN department_passes dp
+      ON p.purchase_type = 'dept_pass' AND dp.id = p.pass_id
+    LEFT JOIN universities un
+      ON un.id = COALESCE(d.university_id, dp.university_id)
+    LEFT JOIN departments dep
+      ON dep.id = COALESCE(d.department_id, dp.department_id)
+    WHERE p.payment_status = 'completed'
+    ${periodFilter}
+  `;
+  const salesMetrics = `
+    COUNT(*)::bigint AS transactions,
+    COALESCE(SUM(p.amount_paid), 0)::numeric(14, 2) AS gross_sales,
+    COALESCE(SUM(p.platform_cut), 0)::numeric(14, 2) AS platform_revenue
+  `;
+  const trendStart = rangeConfig.interval
+    ? `date_trunc('${rangeConfig.unit}', NOW() - INTERVAL '${rangeConfig.interval}')`
+    : `COALESCE(
+        (SELECT date_trunc('month', MIN(created_at))
+         FROM purchases WHERE payment_status = 'completed'),
+        date_trunc('month', NOW())
+      )`;
+
+  try {
+    const queries = [
+      db.query(`
+        SELECT ${salesMetrics},
+               CASE WHEN COUNT(*) = 0 THEN 0
+                    ELSE COALESCE(SUM(p.amount_paid) / COUNT(*), 0)
+               END::numeric(14, 2) AS average_sale
+        ${completedSalesFrom}
+      `),
+      db.query(`
+        SELECT un.id AS university_id,
+               COALESCE(un.name, 'Unassigned university') AS university_name,
+               ${salesMetrics}
+        ${completedSalesFrom}
+        GROUP BY un.id, un.name
+        ORDER BY SUM(p.amount_paid) DESC, university_name
+      `),
+      db.query(`
+        SELECT un.id AS university_id,
+               COALESCE(un.name, 'Unassigned university') AS university_name,
+               dep.id AS department_id,
+               COALESCE(dep.name, 'Unassigned department') AS department_name,
+               ${salesMetrics}
+        ${completedSalesFrom}
+        GROUP BY un.id, un.name, dep.id, dep.name
+        ORDER BY SUM(p.amount_paid) DESC, university_name, department_name
+      `),
+      db.query(`
+        SELECT CASE p.purchase_type
+                 WHEN 'dept_pass' THEN 'Department pass'
+                 ELSE 'Individual document'
+               END AS purchase_type,
+               ${salesMetrics}
+        FROM purchases p
+        WHERE p.payment_status = 'completed'
+          ${periodFilter}
+        GROUP BY p.purchase_type
+        ORDER BY SUM(p.amount_paid) DESC
+      `),
+      db.query(`
+        WITH periods AS (
+          SELECT generate_series(
+            ${trendStart},
+            date_trunc('${rangeConfig.unit}', NOW()),
+            INTERVAL '${rangeConfig.step}'
+          ) AS period_start
+        ),
+        period_sales AS (
+          SELECT date_trunc('${rangeConfig.unit}', p.created_at) AS period_start,
+                 COUNT(*)::bigint AS transactions,
+                 COALESCE(SUM(p.amount_paid), 0)::numeric(14, 2) AS gross_sales,
+                 COALESCE(SUM(p.platform_cut), 0)::numeric(14, 2) AS platform_revenue
+          FROM purchases p
+          WHERE p.payment_status = 'completed'
+            ${periodFilter}
+          GROUP BY date_trunc('${rangeConfig.unit}', p.created_at)
+        )
+        SELECT to_char(periods.period_start, '${rangeConfig.format}') AS label,
+               COALESCE(period_sales.transactions, 0)::bigint AS transactions,
+               COALESCE(period_sales.gross_sales, 0)::numeric(14, 2) AS gross_sales,
+               COALESCE(period_sales.platform_revenue, 0)::numeric(14, 2) AS platform_revenue
+        FROM periods
+        LEFT JOIN period_sales USING (period_start)
+        ORDER BY periods.period_start
+      `),
+    ];
+    if (previousPeriodFilter) {
+      queries.push(db.query(`
+        SELECT ${salesMetrics},
+               CASE WHEN COUNT(*) = 0 THEN 0
+                    ELSE COALESCE(SUM(p.amount_paid) / COUNT(*), 0)
+               END::numeric(14, 2) AS average_sale
+        FROM purchases p
+        WHERE p.payment_status = 'completed'
+          ${previousPeriodFilter}
+      `));
+    }
+
+    const results = await Promise.all(queries);
+    const [summary, universities, departments, purchaseTypes, trend] = results;
+
+    const toNumber = value => Number(value) || 0;
+    const mapMetrics = row => ({
+      transactions: toNumber(row.transactions),
+      grossSales: toNumber(row.gross_sales),
+      platformRevenue: toNumber(row.platform_revenue),
+    });
+    const mapSummary = row => ({
+      ...mapMetrics(row),
+      averageSale: toNumber(row.average_sale),
+    });
+
+    res.json({
+      range,
+      summary: mapSummary(summary.rows[0]),
+      previousSummary: previousPeriodFilter ? mapSummary(results[5].rows[0]) : null,
+      universities: universities.rows.map(row => ({
+        universityId: row.university_id,
+        universityName: row.university_name,
+        ...mapMetrics(row),
+      })),
+      departments: departments.rows.map(row => ({
+        universityId: row.university_id,
+        universityName: row.university_name,
+        departmentId: row.department_id,
+        departmentName: row.department_name,
+        ...mapMetrics(row),
+      })),
+      purchaseTypes: purchaseTypes.rows.map(row => ({
+        purchaseType: row.purchase_type,
+        ...mapMetrics(row),
+      })),
+      trend: trend.rows.map(row => ({
+        label: row.label,
+        ...mapMetrics(row),
+      })),
+    });
+  } catch (err) {
+    console.error('Admin sales report failed:', err);
+    res.status(500).json({ error: 'Sales report failed' });
+  }
+});
+
 // ─── Seller management ─────────────────────────────────────────────────────
 router.get('/sellers/pending', async (req, res) => {
   const { rows } = await db.query(`
@@ -51,9 +217,10 @@ router.post('/sellers/:id/approve', async (req, res) => {
     [req.params.id]
   );
   await db.query(`
-    INSERT INTO notifications (user_id, type, title, message)
+    INSERT INTO notifications (user_id, type, title, message, target_page)
     VALUES ($1, 'seller_approved', 'Seller application approved!',
-      'Congratulations! Your seller account is now active. You can start uploading notes.')
+      'Congratulations! Your seller account is now active. You can start uploading notes.',
+      'seller-dashboard')
   `, [req.params.id]);
   await db.query('INSERT INTO admin_logs (admin_id, action, target_type, target_id) VALUES ($1, $2, $3, $4)',
     [req.user.id, 'approve_seller', 'user', req.params.id]);
@@ -66,8 +233,8 @@ router.post('/sellers/:id/reject', async (req, res) => {
     `UPDATE users SET seller_status = 'suspended' WHERE id = $1`, [req.params.id]
   );
   await db.query(`
-    INSERT INTO notifications (user_id, type, title, message)
-    VALUES ($1, 'seller_rejected', 'Seller application update', $2)
+    INSERT INTO notifications (user_id, type, title, message, target_page)
+    VALUES ($1, 'seller_rejected', 'Seller application update', $2, 'seller-dashboard')
   `, [req.params.id, reason || 'Your seller application was not approved at this time.']);
   res.json({ message: 'Seller rejected' });
 });
@@ -113,9 +280,9 @@ router.post('/documents/:id/approve', async (req, res) => {
   if (!rows[0]) return res.status(404).json({ error: 'Document not found, not pending, or not processed' });
 
   await db.query(`
-    INSERT INTO notifications (user_id, type, title, message)
-    VALUES ($1, 'document_approved', 'Document approved!', $2)
-  `, [rows[0].seller_id, `"${rows[0].title}" is now live on the marketplace.`]);
+    INSERT INTO notifications (user_id, type, title, message, target_page, target_param)
+    VALUES ($1, 'document_approved', 'Document approved!', $2, 'seller-dashboard', $3)
+  `, [rows[0].seller_id, `"${rows[0].title}" is now live on the marketplace.`, String(req.params.id)]);
 
   await db.query('INSERT INTO admin_logs (admin_id, action, target_type, target_id) VALUES ($1, $2, $3, $4)',
     [req.user.id, 'approve_document', 'document', req.params.id]);
@@ -153,9 +320,9 @@ router.post('/documents/:id/reject', async (req, res) => {
   `, [reason, req.params.id]);
 
   await db.query(`
-    INSERT INTO notifications (user_id, type, title, message)
-    VALUES ($1, 'document_rejected', 'Document not approved', $2)
-  `, [rows[0].seller_id, `"${rows[0].title}" was rejected: ${reason}`]);
+    INSERT INTO notifications (user_id, type, title, message, target_page, target_param)
+    VALUES ($1, 'document_rejected', 'Document not approved', $2, 'seller-dashboard', $3)
+  `, [rows[0].seller_id, `"${rows[0].title}" was rejected: ${reason}`, String(req.params.id)]);
 
   res.json({ message: 'Document rejected' });
 });
@@ -387,6 +554,24 @@ router.post('/sellers/:id/suspend', async (req, res) => {
     await db.query(`UPDATE users SET seller_status = 'suspended' WHERE id = $1`, [req.params.id]);
     res.json({ message: 'Seller suspended' });
   } catch (err) { res.status(500).json({ error: 'Failed to suspend seller' }); }
+});
+
+router.post('/sellers/:id/reactivate', async (req, res) => {
+  try {
+    const { rows } = await db.query(`
+      UPDATE users
+      SET seller_status = 'approved', is_active = true
+      WHERE id = $1 AND role = 'seller' AND seller_status = 'suspended'
+      RETURNING id
+    `, [req.params.id]);
+    if (!rows[0]) return res.status(404).json({ error: 'Suspended seller not found' });
+
+    await db.query(
+      'INSERT INTO admin_logs (admin_id, action, target_type, target_id) VALUES ($1, $2, $3, $4)',
+      [req.user.id, 'reactivate_seller', 'user', req.params.id]
+    );
+    res.json({ message: 'Seller reactivated' });
+  } catch (err) { res.status(500).json({ error: 'Failed to reactivate seller' }); }
 });
 
 module.exports = router;

@@ -100,7 +100,7 @@ router.get('/status/:requestId', auth, async (req, res) => {
 router.get('/my-codes', auth, async (req, res) => {
   try {
     const { rows } = await db.query(`
-      SELECT ac.code, ac.code_type, ac.expires_at, ac.device_bound_at,
+      SELECT ac.id, ac.code, ac.code_type, ac.expires_at, ac.device_bound_at,
              ac.access_count, ac.is_active,
              d.title as document_title, d.course_code,
              dp.name as pass_name,

@@ -203,9 +203,9 @@ async function completePurchase(request, mpesaReceipt, phone, amount) {
 
     // Notify buyer
     await client.query(`
-      INSERT INTO notifications (user_id, type, title, message)
-      VALUES ($1, 'purchase_complete', 'Payment received!', $2)
-    `, [request.buyer_id, `Your access code is: ${code.code}. It expires in 7 days.`]);
+      INSERT INTO notifications (user_id, type, title, message, target_page, target_param)
+      VALUES ($1, 'purchase_complete', 'Payment received!', $2, 'my-codes', $3)
+    `, [request.buyer_id, `Your access code is: ${code.code}. It expires in 7 days.`, String(code.id)]);
 
     await client.query('COMMIT');
     console.log(`✅ Purchase completed. Code: ${code.code}`);

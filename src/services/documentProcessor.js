@@ -91,10 +91,10 @@ async function processDocument(documentId, filePath) {
       [JSON.stringify([{ type: 'document_processing_failed', page: null }]), documentId]
     );
     await db.query(`
-      INSERT INTO notifications (user_id, type, title, message)
-      SELECT id, 'document_review_failed', 'Document needs manual review', $1
+      INSERT INTO notifications (user_id, type, title, message, target_page, target_param)
+      SELECT id, 'document_review_failed', 'Document needs manual review', $1, 'admin', $2
       FROM users WHERE role = 'admin' LIMIT 1
-    `, [`Document #${documentId} could not be fully processed and must be reviewed or rejected.`]);
+    `, [`Document #${documentId} could not be fully processed and must be reviewed or rejected.`, `documents/${documentId}`]);
     throw err;
   }
 }

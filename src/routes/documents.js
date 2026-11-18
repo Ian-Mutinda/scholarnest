@@ -262,16 +262,16 @@ router.post('/', auth, requireSeller, upload.single('document'), async (req, res
           [`High similarity detected (${score}%) with document #${matchedId}`, docId]
         );
         await db.query(`
-          INSERT INTO notifications (user_id, type, title, message)
-          VALUES ($1, 'document_rejected', 'Document rejected', $2)
-        `, [req.user.id, `"${title}" was rejected due to high similarity with existing content (${score}%).`]);
+          INSERT INTO notifications (user_id, type, title, message, target_page, target_param)
+          VALUES ($1, 'document_rejected', 'Document rejected', $2, 'seller-dashboard', $3)
+        `, [req.user.id, `"${title}" was rejected due to high similarity with existing content (${score}%).`, String(docId)]);
       } else {
         // Notify admin to review
         await db.query(`
-          INSERT INTO notifications (user_id, type, title, message)
-          SELECT id, 'new_document_review', 'New document for review', $1
+          INSERT INTO notifications (user_id, type, title, message, target_page, target_param)
+          SELECT id, 'new_document_review', 'New document for review', $1, 'admin', $2
           FROM users WHERE role = 'admin' LIMIT 1
-        `, [`New document "${title}" submitted for review. Plagiarism score: ${score}%`]);
+        `, [`New document "${title}" submitted for review. Plagiarism score: ${score}%`, `documents/${docId}`]);
       }
     }).catch(err => console.error('Async processing error:', err));
 
